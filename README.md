@@ -1,5 +1,3 @@
-TODO: Review this README and add or modify as necessary.
-
 ## ConstellixProvider provider for octoDNS
 
 An [octoDNS](https://github.com/octodns/octodns/) provider that targets [Constellix](https://constellix.com/).
@@ -38,21 +36,25 @@ octodns_constellix==0.0.1
 providers:
   constellix:
     class: octodns_constellix.ConstellixProvider
-    # TODO
+    # Your Contellix api key (required)
+    api_key: env/CONSTELLIX_API_KEY
+    # Your Constellix secret key (required)
+    secret_key: env/CONSTELLIX_SECRET_KEY
+    # Amount of time to wait between requests to avoid
+    # ratelimit (optional)
+    ratelimit_delay: 0.0
 ```
 
 ### Support Information
 
 #### Records
 
-TODO: All octoDNS record types are supported.
+ConstellixProvider supports A, AAAA, ALIAS (ANAME), CAA, CNAME, MX, NS, PTR, SPF, SRV, and TXT. There are some restrictions on CAA tags support.
 
 #### Dynamic
 
-TODO: ConstellixProvider does not support dynamic records.
+ConstellixProvider supports dynamic records.
 
 ### Developement
 
 See the [/script/](/script/) directory for some tools to help with the development process. They generally follow the [Script to rule them all](https://github.com/github/scripts-to-rule-them-all) pattern. Most useful is `./script/bootstrap` which will create a venv and install both the runtime and development related requirements. It will also hook up a pre-commit hook that covers most of what's run by CI.
-
-TODO: any provider specific setup, a docker compose to run things locally etc?
