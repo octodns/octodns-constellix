@@ -15,6 +15,8 @@ from octodns.record import Record
 from octodns.provider import ProviderException
 from octodns.provider.base import BaseProvider
 
+__VERSION__ = '0.0.1'
+
 
 class ConstellixClientException(ProviderException):
     pass
@@ -841,10 +843,8 @@ class ConstellixProvider(BaseProvider):
 
     def _create_update_dynamic_pools(self, pool_data):
         pools = {}
-        self.log.debug("_create_update_dynamic_pools %s", pool_data)
         # TODO: use batch operation here
         for pool_name, pool in pool_data.items():
-            self.log.debug("_create_update_pool %s %s", pool_name, pool)
             # OK, pool is valid, let's create it or update it
             pool_obj = self._create_update_pool(**pool)
             pools[pool_name] = pool_obj
@@ -989,8 +989,6 @@ class ConstellixProvider(BaseProvider):
 
         updated_geofilter = self._client.geofilter_update(
             geofilter_id, geofilter)
-
-        self.log.debug("updated_geofilter %s", updated_geofilter)
         updated_geofilter['id'] = geofilter_id
         return updated_geofilter
 
