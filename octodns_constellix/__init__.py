@@ -41,7 +41,8 @@ class ConstellixClientNotFound(ConstellixClientException):
 class ConstellixClient(object):
     BASE = 'https://api.dns.constellix.com/v1'
 
-    def __init__(self, api_key, secret_key, ratelimit_delay=0.0):
+    def __init__(self, log, api_key, secret_key, ratelimit_delay=0.0):
+        self.log = log
         self.api_key = api_key
         self.secret_key = secret_key
         self.ratelimit_delay = ratelimit_delay
@@ -62,6 +63,7 @@ class ConstellixClient(object):
         ).digest()
 
     def _request(self, method, path, params=None, data=None):
+        self.log.debug("Call _request %s %s", method, path)
         now = self._current_time()
         hmac_hash = self._hmac_hash(now)
 
@@ -104,17 +106,18 @@ class ConstellixClient(object):
         return self._request('GET', path).json()
 
     def domain_create(self, name):
-        resp = self._request('POST', '/domains', data={'names': [name]})
+        resp = self._request('POST', '/domains', data={'names': [name]}).json()
         # Add newly created zone to domain cache
-        self._domains[f'{name}.'] = resp.json()[0]['id']
+        self._domains[f'{name}.'] = resp[0]['id']
+        return resp
 
     def domain_enable_geoip(self, domain_name):
         domain = self.domain(domain_name)
         if domain['hasGeoIP'] is False:
             domain_id = self.domains[domain_name]
-            self._request(
+            return self._request(
                 'PUT', f'/domains/{domain_id}', data={'hasGeoIP': True}
-            )
+            ).json()
 
     def _absolutize_value(self, value, zone_name):
         if value == '':
@@ -157,7 +160,7 @@ class ConstellixClient(object):
         zone_id = self.domains.get(zone_name, False)
         path = f'/domains/{zone_id}/records/{record_type}'
 
-        self._request('POST', path, data=params)
+        return self._request('POST', path, data=params).json()
 
     def record_delete(self, zone_name, record_type, record_id):
         # change ALIAS records to ANAME
@@ -166,7 +169,7 @@ class ConstellixClient(object):
 
         zone_id = self.domains.get(zone_name, False)
         path = f'/domains/{zone_id}/records/{record_type}/{record_id}'
-        self._request('DELETE', path)
+        return self._request('DELETE', path).json()
 
     def pools(self, pool_type):
         if self._pools[pool_type] is None:
@@ -203,21 +206,25 @@ class ConstellixClient(object):
     def pool_update(self, pool_id, data):
         path = f'/pools/{data.get("type")}/{pool_id}'
         try:
-            self._request('PUT', path, data=data).json()
+            data = self._request('PUT', path, data=data).json()
 
         except ConstellixClientBadRequest as e:
             message = str(e)
-            if not message or "no changes to save" not in message:
+            if not message or (
+                "no changes to save" not in message
+                and "are identical" not in message
+            ):
                 raise e
         return data
 
     def pool_delete(self, pool_type, pool_id):
         path = f'/pools/{pool_type}/{pool_id}'
-        self._request('DELETE', path)
+        resp = self._request('DELETE', path).json()
 
         # Update our cache
         if self._pools[pool_type] is not None:
             self._pools[pool_type].pop(pool_id, None)
+        return resp
 
     def geofilters(self):
         if self._geofilters is None:
@@ -253,21 +260,25 @@ class ConstellixClient(object):
     def geofilter_update(self, geofilter_id, data):
         path = f'/geoFilters/{geofilter_id}'
         try:
-            self._request('PUT', path, data=data).json()
+            data = self._request('PUT', path, data=data).json()
 
         except ConstellixClientBadRequest as e:
             message = str(e)
-            if not message or "no changes to save" not in message:
+            if not message or (
+                "no changes to save" not in message
+                and "are identical" not in message
+            ):
                 raise e
         return data
 
     def geofilter_delete(self, geofilter_id):
         path = f'/geoFilters/{geofilter_id}'
-        self._request('DELETE', path)
+        resp = self._request('DELETE', path).json()
 
         # Update our cache
         if self._geofilters is not None:
             self._geofilters.pop(geofilter_id, None)
+        return resp
 
 
 class SonarClientException(ProviderException):
@@ -420,6 +431,20 @@ class SonarClient(object):
 
 
 class ConstellixProvider(BaseProvider):
+    '''
+    Constellix DNS provider
+
+    constellix:
+        class: octodns.provider.constellix.ConstellixProvider
+        # Your Contellix api key (required)
+        api_key: env/CONSTELLIX_API_KEY
+        # Your Constellix secret key (required)
+        secret_key: env/CONSTELLIX_SECRET_KEY
+        # Amount of time to wait between requests to avoid
+        # ratelimit (optional)
+        ratelimit_delay: 0.0
+    '''
+
     SUPPORTS_GEO = False
     SUPPORTS_DYNAMIC = True
     SUPPORTS_ROOT_NS = False
@@ -445,94 +470,123 @@ class ConstellixProvider(BaseProvider):
         self.log = logging.getLogger(f'ConstellixProvider[{id}]')
         self.log.debug('__init__: id=%s, api_key=***, secret_key=***', id)
         super().__init__(id, *args, **kwargs)
-        self._client = ConstellixClient(api_key, secret_key, ratelimit_delay)
+        self._client = ConstellixClient(
+            self.log, api_key, secret_key, ratelimit_delay
+        )
         self._sonar = SonarClient(
             self.log, api_key, secret_key, ratelimit_delay
         )
         self._zone_records = {}
 
     def _data_for_multiple(self, _type, records):
-        record = records[0]
-        if record['recordOption'] == 'pools':
-            return self._data_for_pool(_type, records)
-        return {'ttl': record['ttl'], 'type': _type, 'values': record['value']}
+        if 1 == len(records):
+            record = records[0]
+            return {
+                'ttl': record['ttl'],
+                'type': _type,
+                'values': record['value'],
+            }
+        return self._data_for_pools(_type, records)
 
-    def _data_for_pool(self, _type, records):
+    def _data_for_pool(self, _type, record, pools):
+        pool_id = record['pools'][0]
+        pool = self._client.pool_by_id(_type, pool_id)
+
+        pool_name = pool['name'].split(':')[-1]
+
+        pool_data = {'fallback': None, 'values': []}
+        for value in pool['values']:
+            pool_data['values'].append(
+                {'value': value['value'], 'weight': value['weight']}
+            )
+        pools[pool_name] = pool_data
+        return pool_name
+
+    def _data_for_pools(self, _type, records):
         default_values = []
-        fallback_pool_name = None
         pools = {}
         rules = []
 
         for record in records:
-            # fetch record pool data
-            pool_id = record['pools'][0]
-            pool = self._client.pool_by_id(_type, pool_id)
+            if record['recordOption'] == 'pools':
+                pool_name = self._data_for_pool(_type, record, pools)
+                geofilter_id = 1
+                if (
+                    'geolocation' in record.keys()
+                    and record['geolocation'] is not None
+                ):
+                    # fetch record geofilter data
+                    geofilter_id = record['geolocation']['geoipFilter']
 
-            geofilter_id = 1
-            if (
+                # populate rules
+                if geofilter_id == 1:
+                    rules.append({'pool': pool_name})
+                else:
+                    geofilter = self._client.geofilter_by_id(geofilter_id)
+                    geos = []
+
+                    if 'geoipContinents' in geofilter.keys():
+                        for continent_code in geofilter['geoipContinents']:
+                            geos.append(continent_code)
+
+                    if 'geoipCountries' in geofilter.keys():
+                        for country_code in geofilter['geoipCountries']:
+                            continent_code = country_alpha2_to_continent_code(
+                                country_code
+                            )
+                            geos.append(f'{continent_code}-{country_code}')
+
+                    if 'regions' in geofilter.keys():
+                        for region in geofilter['regions']:
+                            geos.append(
+                                f'{region["continentCode"]}-'
+                                f'{region["countryCode"]}-'
+                                f'{region["regionCode"]}'
+                            )
+                    if 1 == len(geos) and 'default' == geos[0]:
+                        # Global filter on non-default id
+                        rules.append({'pool': pool_name})
+                    else:
+                        rules.append({'pool': pool_name, 'geos': sorted(geos)})
+            elif (
                 'geolocation' in record.keys()
                 and record['geolocation'] is not None
             ):
                 # fetch record geofilter data
                 geofilter_id = record['geolocation']['geoipFilter']
-                geofilter = self._client.geofilter_by_id(geofilter_id)
-
-            pool_name = pool['name'].split(':')[-1]
-
-            # fetch default values from the World Default pool
-            if geofilter_id == 1:
-                fallback_pool_name = pool_name
-                for value in pool['values']:
-                    default_values.append(value['value'])
-
-            # populate pools
-            pools[pool_name] = {'fallback': None, 'values': []}
-            for value in pool['values']:
-                pools[pool_name]['values'].append(
-                    {'value': value['value'], 'weight': value['weight']}
-                )
-
-            # populate rules
-            if geofilter_id == 1:
-                rules.append({'pool': pool_name})
+                # fetch default values from the World entry
+                if geofilter_id == 1:
+                    for value in record['value']:
+                        default_values.append(value)
+                else:
+                    msg = (
+                        f'unsupported geofilter {geofilter_id} '
+                        f'on non-pool record'
+                    )
+                    fallback = 'will ignore the geo filter'
+                    self.supports_warn_or_except(msg, fallback)
+                    record.pop('geolocation', None)
             else:
-                geos = []
+                msg = 'unsupported multiple entries'
+                fallback = f'will use first value {record["value"]}'
+                self.supports_warn_or_except(msg, fallback)
+                return {
+                    'ttl': record['ttl'],
+                    'type': _type,
+                    'values': record['value'].copy(),
+                }
 
-                if 'geoipContinents' in geofilter.keys():
-                    for continent_code in geofilter['geoipContinents']:
-                        geos.append(continent_code)
-
-                if 'geoipCountries' in geofilter.keys():
-                    for country_code in geofilter['geoipCountries']:
-                        continent_code = country_alpha2_to_continent_code(
-                            country_code
-                        )
-                        geos.append(f'{continent_code}-{country_code}')
-
-                if 'regions' in geofilter.keys():
-                    for region in geofilter['regions']:
-                        geos.append(
-                            f'{region["continentCode"]}-'
-                            f'{region["countryCode"]}-'
-                            f'{region["regionCode"]}'
-                        )
-
-                rules.append({'pool': pool_name, 'geos': sorted(geos)})
-
-        # set fallback pool
-        for pool_name in pools:
-            if pool_name != fallback_pool_name:
-                pools[pool_name]['fallback'] = fallback_pool_name
-
-        res = {
-            'ttl': record['ttl'],
-            'type': _type,
-            'dynamic': {
+        res = {'ttl': record['ttl'], 'type': _type, 'values': default_values}
+        if 0 == len(pools.keys()):
+            msg = 'unsupported geo configuration'
+            fallback = 'will use global default only'
+            self.supports_warn_or_except(msg, fallback)
+        else:
+            res['dynamic'] = {
                 'pools': dict(sorted(pools.items(), key=lambda t: t[0])),
                 'rules': sorted(rules, key=lambda t: t['pool']),
-            },
-            'values': default_values,
-        }
+            }
+
         return res
 
     _data_for_A = _data_for_multiple
@@ -654,6 +708,12 @@ class ConstellixProvider(BaseProvider):
         )
         return exists
 
+    def _is_healthcheck_configured(self, record):
+        sonar_healthcheck = record._octodns.get('constellix', {}).get(
+            'healthcheck', None
+        )
+        return sonar_healthcheck is not None
+
     def _healthcheck_config(self, record):
         sonar_healthcheck = record._octodns.get('constellix', {}).get(
             'healthcheck', None
@@ -745,62 +805,70 @@ class ConstellixProvider(BaseProvider):
             )
         yield {'name': record.name, 'ttl': record.ttl, 'roundRobin': values}
 
-    def _handle_pools(self, record):
-        healthcheck = self._healthcheck_config(record)
+    def _gen_pool_name(self, record, pool_name):
+        return f'{record.zone.name}:{record.name}:{record._type}:{pool_name}'
 
-        # If we don't have dynamic, then there's no pools
-        if not getattr(record, 'dynamic', False):
-            return []
-
-        res_pools = []
-
-        for i, rule in enumerate(record.dynamic.rules):
-            pool_name = rule.data.get('pool')
-            pool = record.dynamic.pools.get(pool_name)
+    def _gen_pool_data(self, record):
+        pool_data = {}
+        for pool_name, pool in record.dynamic.pools.items():
             values = [
                 {'value': value['value'], 'weight': value['weight']}
                 for value in pool.data.get('values', [])
             ]
+            full_pool_name = self._gen_pool_name(record, pool_name)
+            pool_data[full_pool_name] = {
+                'pool_name': full_pool_name,
+                'pool_type': record._type,
+                'values': values,
+            }
+        return pool_data
 
-            # Make a pool name based on zone, record, type and name
-            generated_pool_name = (
-                f'{record.zone.name}:{record.name}:{record._type}:{pool_name}'
-            )
+    def _create_update_dynamic_healthchecks(self, record, pool_data):
+        healthcheck = self._healthcheck_config(record)
+        if healthcheck is None:
+            return pool_data, None
 
-            # Create Sonar checks if needed
-            if healthcheck is not None:
-                check_sites = self._sonar.agents_for_regions(
-                    healthcheck["sonar_regions"]
+        check_sites = self._sonar.agents_for_regions(
+            healthcheck['sonar_regions']
+        )
+        health_data = {}
+        for pool_name, pool in pool_data.items():
+            for value in pool['values']:
+                check_name = '{}-{}'.format(pool_name, value['value'])
+                check_obj = self._create_update_check(
+                    pool_type=record._type,
+                    check_name=check_name,
+                    check_type=healthcheck['sonar_type'].lower(),
+                    value=value['value'],
+                    port=healthcheck['sonar_port'],
+                    interval=healthcheck['sonar_interval'],
+                    sites=check_sites,
                 )
-                for value in values:
-                    check_obj = self._create_update_check(
-                        pool_type=record._type,
-                        check_name='{}-{}'.format(
-                            generated_pool_name, value['value']
-                        ),
-                        check_type=healthcheck["sonar_type"].lower(),
-                        value=value['value'],
-                        port=healthcheck["sonar_port"],
-                        interval=healthcheck["sonar_interval"],
-                        sites=check_sites,
-                    )
-                    value['checkId'] = check_obj['id']
-                    value['policy'] = "followsonar"
+                value['checkId'] = check_obj['id']
+                value['policy'] = 'followsonar'
+                health_data[check_name] = check_obj
+        return pool_data, health_data
 
+    def _create_update_dynamic_pools(self, pool_data, health_data):
+        pools = {}
+        # TODO: use batch operation here
+        for pool_name, pool in pool_data.items():
             # OK, pool is valid, let's create it or update it
-            self.log.debug("Creating pool %s", generated_pool_name)
-            pool_obj = self._create_update_pool(
-                pool_name=generated_pool_name,
-                pool_type=record._type,
-                ttl=record.ttl,
-                values=values,
-            )
+            pool_obj = self._create_update_pool(**pool)
+            pools[pool_name] = pool_obj
+        return pools
 
-            # Now will crate GeoFilter for the pool
+    def _create_update_dynamic_rules(self, record):
+        rules = {}
+        for i, rule in enumerate(record.dynamic.rules):
+            pool_name = rule.data.get('pool')
+            full_pool_name = self._gen_pool_name(record, pool_name)
+
+            geofilter_obj = None
+            # Now will create GeoFilter for the pool
             continents = []
             countries = []
             regions = []
-
             for geo in rule.data.get('geos', []):
                 codes = geo.split('-')
                 n = len(geo)
@@ -816,22 +884,30 @@ class ConstellixProvider(BaseProvider):
                             'regionCode': codes[2],
                         }
                     )
+            geofilter_obj = self._create_update_geofilter(
+                full_pool_name, continents, countries, regions
+            )
+            rules[full_pool_name] = geofilter_obj
 
-            if (
-                len(continents) == 0
-                and len(countries) == 0
-                and len(regions) == 0
-            ):
-                pool_obj['geofilter'] = 1
-            else:
-                self.log.debug("Creating geofilter %s", generated_pool_name)
-                geofilter_obj = self._create_update_geofilter(
-                    generated_pool_name, continents, countries, regions
-                )
-                pool_obj['geofilter'] = geofilter_obj['id']
+        return rules
 
-            res_pools.append(pool_obj)
-        return res_pools
+    def _create_update_dynamic(self, record):
+        # If we don't have dynamic, then there's no pools
+        if not getattr(record, 'dynamic', False):
+            return {}, {}
+
+        # generate basic pool data
+        pool_data = self._gen_pool_data(record)
+        # create healthchecks and amend pool data with check ids
+        pool_data, health_data = self._create_update_dynamic_healthchecks(
+            record, pool_data
+        )
+        pools = self._create_update_dynamic_pools(pool_data, health_data)
+        # create ip filter rules
+        rules = self._create_update_dynamic_rules(record)
+
+        # return created or updated pool objects
+        return rules, pools
 
     def _create_update_check(
         self, pool_type, check_name, check_type, value, port, interval, sites
@@ -858,13 +934,12 @@ class ConstellixProvider(BaseProvider):
 
         return self._sonar.check_create(check_type, check)
 
-    def _create_update_pool(self, pool_name, pool_type, ttl, values):
+    def _create_update_pool(self, pool_name, pool_type, values):
         pool = {
             'name': pool_name,
             'type': pool_type,
             'numReturn': 1,
             'minAvailableFailover': 1,
-            'ttl': ttl,
             'values': values,
         }
         existing_pool = self._client.pool(pool_type, pool_name)
@@ -879,21 +954,32 @@ class ConstellixProvider(BaseProvider):
     def _create_update_geofilter(
         self, geofilter_name, continents, countries, regions
     ):
+        continents_len = len(continents)
+        countries_len = len(countries)
+        regions_len = len(regions)
+
+        # special handling for "World" filters
+        if 0 == (continents_len + countries_len + regions_len):
+            continents.append('default')
         geofilter = {
             'filterRulesLimit': 100,
             'name': geofilter_name,
             'geoipContinents': continents,
-            'geoipCountries': countries,
-            'regions': regions,
         }
-        if len(regions) == 0:
-            geofilter.pop('regions', None)
+        if 0 != countries_len:
+            geofilter['geoipCountries'] = countries
+        if 0 != regions_len:
+            geofilter['regions'] = regions
 
         existing_geofilter = self._client.geofilter(geofilter_name)
         if not existing_geofilter:
             return self._client.geofilter_create(geofilter)
 
         geofilter_id = existing_geofilter['id']
+        if 1 == geofilter_id:
+            self.log.warning('Ignoring try to modify default geofilter id 1')
+            return existing_geofilter
+
         updated_geofilter = self._client.geofilter_update(
             geofilter_id, geofilter
         )
@@ -902,19 +988,14 @@ class ConstellixProvider(BaseProvider):
 
     def _apply_Create(self, change, domain_name):
         new = change.new
-        params_for = getattr(self, f'_params_for_{new._type}')
-        pools = self._handle_pools(new)
+        params_gen = getattr(self, f'_params_for_{new._type}')(new)
+        rules, pools = self._create_update_dynamic(new)
 
-        for params in params_for(new):
-            if len(pools) == 0:
-                self._client.record_create(new.zone.name, new._type, params)
-            elif len(pools) == 1:
-                params['pools'] = [pools[0]['id']]
-                params['recordOption'] = 'pools'
-                params.pop('roundRobin', None)
-                self.log.debug(
-                    "Creating record %s %s", new.zone.name, new._type
-                )
+        count = 0
+        for params in params_gen:
+            count = 1 + count
+            pool_size = len(pools.keys())
+            if pool_size == 0:
                 self._client.record_create(new.zone.name, new._type, params)
             else:
                 # To use GeoIPFilter feature we need to enable it for domain
@@ -922,34 +1003,26 @@ class ConstellixProvider(BaseProvider):
                 self._client.domain_enable_geoip(domain_name)
 
                 # First we need to create World Default (1) Record
-                for pool in pools:
-                    if pool['geofilter'] != 1:
-                        continue
-                    params['pools'] = [pool['id']]
-                    params['recordOption'] = 'pools'
-                    params['geolocation'] = {
-                        'geoipUserRegion': [pool['geofilter']]
-                    }
-                    params.pop('roundRobin', None)
-                    self.log.debug(
-                        "Creating record %s %s", new.zone.name, new._type
-                    )
-                    self._client.record_create(new.zone.name, new._type, params)
+                # that uses plain values without a pool
+                params['geolocation'] = {'geoipUserRegion': [1]}
+                self._client.record_create(new.zone.name, new._type, params)
 
-                # Now we can create the rest of records
-                for pool in pools:
-                    if pool['geofilter'] == 1:
-                        continue
-                    params['pools'] = [pool['id']]
-                    params['recordOption'] = 'pools'
-                    params['geolocation'] = {
-                        'geoipUserRegion': [pool['geofilter']]
+                # Now we can create the rest of records.
+                for pool_name, pool in pools.items():
+                    pool_params = {
+                        'name': params['name'],
+                        'ttl': params['ttl'],
+                        'recordOption': 'pools',
+                        'pools': [pool['id']],
                     }
-                    params.pop('roundRobin', None)
-                    self.log.debug(
-                        "Creating record %s %s", new.zone.name, new._type
+                    rule = rules.get(pool_name)
+                    if rule:
+                        pool_params['geolocation'] = {
+                            'geoipUserRegion': [rule['id']]
+                        }
+                    self._client.record_create(
+                        new.zone.name, new._type, pool_params
                     )
-                    self._client.record_create(new.zone.name, new._type, params)
 
     def _apply_Update(self, change, domain_name):
         self._apply_Delete(change, domain_name)
@@ -968,60 +1041,74 @@ class ConstellixProvider(BaseProvider):
                 and existing._type == record['type']
             ):
 
-                # handle dynamic record
-                if record['recordOption'] == 'pools':
-                    if record['geolocation'] is None:
-                        world_default_record = record
-                    else:
-                        if record['geolocation']['geoipFilter'] == 1:
-                            world_default_record = record
-                        else:
-                            # delete record
-                            self.log.debug(
-                                "Deleting record %s %s",
-                                zone.name,
-                                record['type'],
-                            )
-                            self._client.record_delete(
-                                zone.name, record['type'], record['id']
-                            )
-                            # delete geofilter
-                            self.log.debug("Deleting geofilter %s", zone.name)
-                            self._client.geofilter_delete(
-                                record['geolocation']['geoipFilter']
-                            )
-
-                            # delete pool
-                            self.log.debug(
-                                "Deleting pool %s %s", zone.name, record['type']
-                            )
-                            self._client.pool_delete(
-                                record['type'], record['pools'][0]
-                            )
-
-                # for all the rest records
+                # Handle dynamic record.
+                if (
+                    record.get('geolocation')
+                    and record['geolocation']['geoipFilter'] == 1
+                ):
+                    world_default_record = record
                 else:
+                    # delete record
+                    self.log.debug(
+                        "Deleting record %s %s", zone.name, record['type']
+                    )
                     self._client.record_delete(
                         zone.name, record['type'], record['id']
                     )
-        # delete World Default
+                    if record['recordOption'] == 'pools':
+                        # delete geofilter
+                        self.log.debug("Deleting geofilter %s", zone.name)
+                        self._client.geofilter_delete(
+                            record['geolocation']['geoipFilter']
+                        )
+                        # delete pool
+                        self.log.debug(
+                            "Deleting pool %s %s", zone.name, record['type']
+                        )
+                        self._client.pool_delete(
+                            record['type'], record['pools'][0]
+                        )
+
+        # Must delete World Default record last, do not touch global geofilter
         if world_default_record:
+            record = world_default_record
             # delete record
-            self.log.debug(
-                "Deleting record %s %s", zone.name, world_default_record['type']
-            )
-            self._client.record_delete(
-                zone.name,
-                world_default_record['type'],
-                world_default_record['id'],
-            )
-            # delete pool
-            self.log.debug(
-                "Deleting pool %s %s", zone.name, world_default_record['type']
-            )
-            self._client.pool_delete(
-                world_default_record['type'], world_default_record['pools'][0]
-            )
+            self.log.debug("Deleting record %s %s", zone.name, record['type'])
+            self._client.record_delete(zone.name, record['type'], record['id'])
+            if record['recordOption'] == 'pools':
+                # delete pool
+                self.log.debug("Deleting pool %s %s", zone.name, record['type'])
+                self._client.pool_delete(record['type'], record['pools'][0])
+
+    def _process_desired_zone(self, desired):
+        # Filter out fallback values without configured sonar monitoring
+        for record in desired.records:
+            if not getattr(record, 'dynamic', False):
+                continue
+
+            if not self._is_healthcheck_configured(record):
+                incompatible_pools = []
+                for name, pool in record.dynamic.pools.items():
+                    if pool.data['fallback'] is not None:
+                        incompatible_pools.append(name)
+
+                if not incompatible_pools:
+                    continue
+
+                incompatible_pools = ','.join(incompatible_pools)
+                msg = (
+                    f'fallback without monitor for pools '
+                    f'{incompatible_pools} in {record.fqdn}'
+                )
+                fallback = 'will ignore it'
+                self.supports_warn_or_except(msg, fallback)
+
+                record = record.copy()
+                for pool in record.dynamic.pools.values():
+                    pool.data['fallback'] = None
+                desired.add_record(record, replace=True)
+
+        return super()._process_desired_zone(desired)
 
     def _apply(self, plan):
         desired = plan.desired
