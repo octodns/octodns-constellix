@@ -4,103 +4,77 @@
 
 from os.path import dirname, join
 from requests import HTTPError
+import logging
 from requests_mock import ANY, mock as requests_mock
 from unittest import TestCase
 from unittest.mock import Mock, PropertyMock, call
 
 from octodns.record import Record
+from octodns.provider import SupportsException
 from octodns.provider.yaml import YamlProvider
 from octodns.zone import Zone
 
-from octodns_constellix import ConstellixProvider, ConstellixClientBadRequest
+from octodns_constellix import ConstellixProvider, ConstellixClientBadRequest,\
+    ConstellixClient
 
 
 class TestConstellixProvider(TestCase):
-    expected = Zone('unit.tests.', [])
-    source = YamlProvider('test', join(dirname(__file__), 'config'))
-    source.populate(expected)
+    def populate_expected(self, zone_name):
+        expected = Zone(zone_name, [])
+        source = YamlProvider('test',
+                              join(dirname(__file__), 'config'))
+        source.populate(expected)
 
-    # Our test suite differs a bit, add our NS and remove the simple one
-    expected.add_record(Record.new(expected, 'under', {
-        'ttl': 3600,
-        'type': 'NS',
-        'values': [
-            'ns1.unit.tests.',
-            'ns2.unit.tests.',
-        ]
-    }))
+        # Constellix does not allow IP addresses for NS entries.
+        # Add our NS record and remove the default test case.
+        for record in list(expected.records):
+            if record.name == 'sub' and record._type == 'NS':
+                expected._remove_record(record)
+            if record.name == '' and record._type == 'NS':
+                expected._remove_record(record)
+        expected.add_record(Record.new(expected, 'under', {
+            'ttl': 3600,
+            'type': 'NS',
+            'values': [
+                'ns1.unit.tests.',
+                'ns2.unit.tests.',
+            ]
+        }))
 
-    # Add some ALIAS records
-    expected.add_record(Record.new(expected, '', {
-        'ttl': 1800,
-        'type': 'ALIAS',
-        'value': 'aname.unit.tests.'
-    }))
+        return expected
 
-    # Add a dynamic record
-    expected.add_record(Record.new(expected, 'www.dynamic', {
-        'ttl': 300,
-        'type': 'A',
-        'values': [
-            '1.2.3.4',
-            '1.2.3.5'
-        ],
-        'dynamic': {
-            'pools': {
-                'two': {
-                    'values': [{
-                        'value': '1.2.3.4',
-                        'weight': 1
-                    }, {
-                        'value': '1.2.3.5',
-                        'weight': 1
-                    }],
-                },
-            },
-            'rules': [{
-                'pool': 'two',
-            }],
-        },
-    }))
+    def test_populate(self):
+        provider = ConstellixProvider('test', 'api', 'secret')
+        expected = self.populate_expected('unit.tests.')
 
-    for record in list(expected.records):
-        if record.name == 'sub' and record._type == 'NS':
-            expected._remove_record(record)
-        if record.name == '' and record._type == 'NS':
-            expected._remove_record(record)
+        # Add an ALIAS record.
+        expected.add_record(Record.new(expected, '', {
+            'ttl': 1800,
+            'type': 'ALIAS',
+            'value': 'aname.unit.tests.'
+        }))
 
-    expected_healthcheck = Zone('unit.tests.', [])
-    source = YamlProvider('test', join(dirname(__file__), 'config'))
-    source.populate(expected_healthcheck)
-
-    # Our test suite differs a bit, add our NS and remove the simple one
-    expected_healthcheck.add_record(Record.new(expected_healthcheck, 'under', {
-        'ttl': 3600,
-        'type': 'NS',
-        'values': [
-            'ns1.unit.tests.',
-            'ns2.unit.tests.',
-        ]
-    }))
-
-    # Add some ALIAS records
-    expected_healthcheck.add_record(Record.new(expected_healthcheck, '', {
-        'ttl': 1800,
-        'type': 'ALIAS',
-        'value': 'aname.unit.tests.'
-    }))
-
-    # Add a dynamic record
-    expected_healthcheck.add_record(
-        Record.new(expected_healthcheck, 'www.dynamic', {
+        # Add a dynamic record.
+        expected.add_record(Record.new(expected, 'www.dynamic', {
             'ttl': 300,
             'type': 'A',
+            # The global geo filter id=1 is exclusively used
+            # for these non-pooled default values.
             'values': [
-                '1.2.3.4',
-                '1.2.3.5'
+                '2.2.3.4',
+                '2.2.3.5'
             ],
             'dynamic': {
                 'pools': {
+                    'one': {
+                        'values': [{
+                            'value': '1.2.3.6',
+                            'weight': 1
+                        }, {
+                            'value': '1.2.3.7',
+                            'weight': 1
+                        }],
+                    },
                     'two': {
                         'values': [{
                             'value': '1.2.3.4',
@@ -112,173 +86,28 @@ class TestConstellixProvider(TestCase):
                     },
                 },
                 'rules': [{
+                    'geos': [
+                        'AS',
+                        'EU-ES',
+                        'EU-UA',
+                        'EU-SE',
+                        'NA-CA-NL',
+                        'OC'
+                    ],
+                    'pool': 'one'
+                }, {
                     'pool': 'two',
                 }],
-            },
-            'octodns': {
-                'constellix': {
-                    'healthcheck': {
-                        'sonar_port': 80,
-                        'sonar_regions': [
-                            'ASIAPAC',
-                            'EUROPE'
-                        ],
-                        'sonar_type': 'TCP'
-                    }
-                }
             }
-        })
-    )
+        }))
 
-    for record in list(expected_healthcheck.records):
-        if record.name == 'sub' and record._type == 'NS':
-            expected_healthcheck._remove_record(record)
-            break
-
-    expected_healthcheck_world = Zone('unit.tests.', [])
-    source = YamlProvider('test', join(dirname(__file__), 'config'))
-    source.populate(expected_healthcheck_world)
-
-    # Our test suite differs a bit, add our NS and remove the simple one
-    expected_healthcheck_world.add_record(
-        Record.new(expected_healthcheck_world, 'under', {
-            'ttl': 3600,
-            'type': 'NS',
-            'values': [
-                'ns1.unit.tests.',
-                'ns2.unit.tests.',
-            ]
-        })
-    )
-
-    # Add some ALIAS records
-    expected_healthcheck_world.add_record(
-        Record.new(expected_healthcheck_world, '', {
-            'ttl': 1800,
-            'type': 'ALIAS',
-            'value': 'aname.unit.tests.'
-        })
-    )
-
-    # Add a dynamic record
-    expected_healthcheck_world.add_record(
-        Record.new(expected_healthcheck_world, 'www.dynamic', {
-            'ttl': 300,
-            'type': 'AAAA',
-            'values': [
-                '2601:644:500:e210:62f8:1dff:feb8:947a',
-                '2601:642:500:e210:62f8:1dff:feb8:947a'
-            ],
-            'dynamic': {
-                'pools': {
-                    'two': {
-                        'values': [{
-                            'value': '2601:644:500:e210:62f8:1dff:feb8:947a',
-                            'weight': 1
-                        }, {
-                            'value': '2601:642:500:e210:62f8:1dff:feb8:947a',
-                            'weight': 1
-                        }],
-                    },
-                },
-                'rules': [{
-                    'pool': 'two',
-                }],
+        provider._client.geofilters = Mock(return_value=[
+            {
+                'id': 1,
+                'name': 'World (Default)',
+                'geoipContinents': ['default']
             },
-            'octodns': {
-                'constellix': {
-                    'healthcheck': {
-                        'sonar_port': 80,
-                        'sonar_regions': [
-                            'WORLD'
-                        ],
-                        'sonar_type': 'HTTP'
-                    }
-                }
-            }
-        })
-    )
-
-    for record in list(expected_healthcheck_world.records):
-        if record.name == 'sub' and record._type == 'NS':
-            expected_healthcheck_world._remove_record(record)
-            break
-
-    expected_dynamic = Zone('unit.tests.', [])
-    source = YamlProvider('test', join(dirname(__file__), 'config'))
-    source.populate(expected_dynamic)
-
-    # Our test suite differs a bit, add our NS and remove the simple one
-    expected_dynamic.add_record(Record.new(expected_dynamic, 'under', {
-        'ttl': 3600,
-        'type': 'NS',
-        'values': [
-            'ns1.unit.tests.',
-            'ns2.unit.tests.',
-        ]
-    }))
-
-    # Add some ALIAS records
-    expected_dynamic.add_record(Record.new(expected_dynamic, '', {
-        'ttl': 1800,
-        'type': 'ALIAS',
-        'value': 'aname.unit.tests.'
-    }))
-
-    # Add a dynamic record
-    expected_dynamic.add_record(Record.new(expected_dynamic, 'www.dynamic', {
-        'ttl': 300,
-        'type': 'A',
-        'values': [
-            '1.2.3.4',
-            '1.2.3.5'
-        ],
-        'dynamic': {
-            'pools': {
-                'one': {
-                    'fallback': 'two',
-                    'values': [{
-                        'value': '1.2.3.6',
-                        'weight': 1
-                    }, {
-                        'value': '1.2.3.7',
-                        'weight': 1
-                    }],
-                },
-                'two': {
-                    'values': [{
-                        'value': '1.2.3.4',
-                        'weight': 1
-                    }, {
-                        'value': '1.2.3.5',
-                        'weight': 1
-                    }],
-                },
-            },
-            'rules': [{
-                'geos': [
-                    'AS',
-                    'EU-ES',
-                    'EU-UA',
-                    'EU-SE',
-                    'NA-CA-NL',
-                    'OC'
-                ],
-                'pool': 'one'
-            }, {
-                'pool': 'two',
-            }],
-        }
-    }))
-
-    for record in list(expected_dynamic.records):
-        if record.name == 'sub' and record._type == 'NS':
-            expected_dynamic._remove_record(record)
-        if record.name == '' and record._type == 'NS':
-            expected_dynamic._remove_record(record)
-
-    def test_populate(self):
-        provider = ConstellixProvider('test', 'api', 'secret')
+        ])
 
         # Bad auth
         with requests_mock() as mock:
@@ -328,7 +157,7 @@ class TestConstellixProvider(TestCase):
                 provider.populate(zone)
             self.assertEqual(502, ctx.exception.response.status_code)
 
-        # Non-existent zone doesn't populate anything
+        # Non-existent zone doesn't populate anything.
         with requests_mock() as mock:
             mock.get(ANY, status_code=404,
                      text='<html><head></head><body></body></html>')
@@ -343,7 +172,7 @@ class TestConstellixProvider(TestCase):
                 provider._sonar.agents
             self.assertEqual('Not Found', str(ctx.exception))
 
-        # Sonar Normal response
+        # Sonar Normal response.
         provider = ConstellixProvider('test', 'api', 'secret')
         with requests_mock() as mock:
             mock.get(ANY, status_code=200, text='[]')
@@ -377,7 +206,7 @@ class TestConstellixProvider(TestCase):
                 zone = Zone('unit.tests.', [])
                 provider.populate(zone)
                 self.assertEqual(17, len(zone.records))
-                changes = self.expected_dynamic.changes(zone, provider)
+                changes = expected.changes(zone, provider)
                 self.assertEqual(0, len(changes))
 
         # 2nd populate makes no network calls/all from cache
@@ -385,87 +214,225 @@ class TestConstellixProvider(TestCase):
         provider.populate(again)
         self.assertEqual(17, len(again.records))
 
-        # bust the cache
+        # Bust the cache.
         del provider._zone_records[zone.name]
 
     def test_apply(self):
         provider = ConstellixProvider('test', 'api', 'secret')
+        expected = self.populate_expected('unit.tests.')
+
+        # Add an ALIAS record
+        expected.add_record(Record.new(expected, '', {
+            'ttl': 1800,
+            'type': 'ALIAS',
+            'value': 'aname.unit.tests.'
+        }))
 
         resp = Mock()
         resp.json = Mock()
         provider._client._request = Mock(return_value=resp)
 
-        # non-existent domain, create everything
-        resp.json.side_effect = [
+        # Non-existent domain, create everything.
+        resp_side_effect = [
             [],  # no domains returned during populate
             [{
                 'id': 123123,
                 'name': 'unit.tests'
             }],  # domain created in apply
-            [],  # No pools returned during populate
             [{
-                "id": 1808520,
-                "name": "unit.tests.:www.dynamic:A:two",
-            }]   # pool created in apply
+                'id': 1808516,
+                'type': 'A',
+                'name': 'www',
+                'ttl': 300,
+                'recordOption': 'roundRobin',
+                'value': [
+                    '1.2.3.4',
+                    '2.2.3.4',
+                ]
+            }],  # global default entry created in apply
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            []
         ]
+        resp.json.side_effect = resp_side_effect
 
-        plan = provider.plan(self.expected)
+        plan = provider.plan(expected)
 
-        # No ignored, no excluded, no unsupported
-        n = len(self.expected.records) - 7
+        # 23 records given in unit.tests.yaml
+        #  1 ALIAS record added
+        #  1 Root NS record removed by test setup
+        # 23 records exepected
+        #  1 ignored
+        #  1 exclued
+        #  5 unsupported: URLFWD, NAPTR, LOC, SSHFP, DNAME
+        #  8 records not applied
+        # 16 records applied
+        self.assertEqual(len(expected.records), 23)
+        n = len(expected.records) - 7
         self.assertEqual(n, len(plan.changes))
         self.assertEqual(n, provider.apply(plan))
 
+        # Check that nothing else happened during apply.
+        self.assertEqual(len(resp_side_effect),
+                         provider._client._request.call_count)
+
+        # Check what happened during apply.
         provider._client._request.assert_has_calls([
             # get all domains to build the cache
             call('GET', '/domains'),
             # created the domain
-            call('POST', '/domains', data={'names': ['unit.tests']})
-        ])
-
-        # Check we tried to get our pool
-        provider._client._request.assert_has_calls([
-            # get all pools to build the cache
-            call('GET', '/pools/A'),
-            # created the pool
-            call('POST', '/pools/A', data={
-                'name': 'unit.tests.:www.dynamic:A:two',
-                'type': 'A',
-                'numReturn': 1,
-                'minAvailableFailover': 1,
+            call('POST', '/domains', data={'names': ['unit.tests']}),
+            # created a simple A record with non-default ttl
+            # and ignoring unsupported geo information
+            call('POST', '/domains/123123/records/A', data={
+                'name': '',
                 'ttl': 300,
-                'values': [{
-                    "value": "1.2.3.4",
-                    "weight": 1
-                }, {
-                    "value": "1.2.3.5",
-                    "weight": 1
-                }]
-            })
-        ])
-
-        # These two checks are broken up so that ordering doesn't break things.
-        # Python3 doesn't make the calls in a consistent order so different
-        # things follow the GET / on different runs
-        provider._client._request.assert_has_calls([
-            call('POST', '/domains/123123/records/SRV', data={
+                'roundRobin': [{'value': '1.2.3.4'}, {'value': '1.2.3.5'}]}
+            ),
+            # created an ALIAS record with ALIAS to ANAME mapping
+            call('POST', '/domains/123123/records/ANAME', data={
+                'name': '',
+                'ttl': 1800,
                 'roundRobin': [{
-                    'priority': 10,
-                    'weight': 20,
-                    'value': 'foo-1.unit.tests.',
-                    'port': 30
-                }, {
-                    'priority': 12,
-                    'weight': 20,
-                    'value': 'foo-2.unit.tests.',
-                    'port': 30
-                }],
+                    'value': 'aname.unit.tests.',
+                    'disableFlag': False}]
+            }),
+            # created a CAA record
+            call('POST', '/domains/123123/records/CAA', data={
+                'name': '',
+                'ttl': 3600,
+                'roundRobin': [{
+                    'tag': 'issue',
+                    'data': 'ca.unit.tests',
+                    'flag': 0}]
+            }),
+            # created SRV record
+            call('POST', '/domains/123123/records/SRV', data={
+                'name': '_imap._tcp',
+                'ttl': 600,
+                'roundRobin': [{
+                    'value': '.',
+                    'priority': 0,
+                    'weight': 0,
+                    'port': 0}]
+            }),
+            call('POST', '/domains/123123/records/SRV', data={
+                'name': '_pop3._tcp',
+                'ttl': 600,
+                'roundRobin': [{
+                    'value': '.',
+                    'priority': 0,
+                    'weight': 0,
+                    'port': 0}]
+            }),
+            call('POST', '/domains/123123/records/SRV', data={
                 'name': '_srv._tcp',
                 'ttl': 600,
+                'roundRobin': [{
+                    'value': 'foo-1.unit.tests.',
+                    'priority': 10,
+                    'weight': 20,
+                    'port': 30
+                }, {
+                    'value': 'foo-2.unit.tests.',
+                    'priority': 12,
+                    'weight': 20,
+                    'port': 30
+                }]
             }),
+            call('POST', '/domains/123123/records/SRV', data={
+                'name': '_srv._tcp',
+                'ttl': 600,
+                'roundRobin': [{
+                    'value': 'foo-1.unit.tests.',
+                    'priority': 10,
+                    'weight': 20,
+                    'port': 30
+                }, {
+                    'value': 'foo-2.unit.tests.',
+                    'priority': 12,
+                    'weight': 20,
+                    'port': 30
+                }]
+            }),
+            call('POST', '/domains/123123/records/AAAA', data={
+                'name': 'aaaa',
+                'ttl': 600,
+                'roundRobin': [{
+                    'value': '2601:644:500:e210:62f8:1dff:feb8:947a'}]}),
+            call('POST', '/domains/123123/records/CNAME', data={
+                'name': 'cname', 'ttl': 300, 'host': 'unit.tests.'}),
+            call('POST', '/domains/123123/records/CNAME', data={
+                'name': 'included', 'ttl': 3600, 'host': 'unit.tests.'}),
+            call('POST', '/domains/123123/records/MX', data={
+                'value': 'smtp-1.unit.tests.',
+                'name': 'mx',
+                'ttl': 300,
+                'roundRobin': [{
+                    'value': 'smtp-4.unit.tests.',
+                    'level': 10
+                }, {
+                    'value': 'smtp-2.unit.tests.',
+                    'level': 20
+                }, {
+                    'value': 'smtp-3.unit.tests.',
+                    'level': 30
+                }, {
+                    'value': 'smtp-1.unit.tests.',
+                    'level': 40
+                }]
+            }),
+            call('POST', '/domains/123123/records/PTR', data={
+                'name': 'ptr',
+                'ttl': 300,
+                'roundRobin': [{
+                    'value': 'foo.bar.com.', 'disableFlag': False}]}),
+            call('POST', '/domains/123123/records/SPF', data={
+                'name': 'spf',
+                'ttl': 600,
+                'roundRobin': [{'value': '"v=spf1 ip4:192.168.0.1/16-all"'}]}),
+            call('POST', '/domains/123123/records/TXT', data={
+                'name': 'txt',
+                'ttl': 600,
+                'roundRobin': [{
+                    'value': '"Bah bah black sheep"'
+                }, {
+                    'value': '"have you any wool."'
+                }, {
+                    'value': ('"v=DKIM1;k=rsa;s=email;h=sha256;'
+                              'p=A/kinda+of/long/string+with+numb3rs"')
+                }]}),
+            call('POST', '/domains/123123/records/NS', data={
+                'name': 'under',
+                'ttl': 3600,
+                'roundRobin': [{
+                    'value': 'ns1.unit.tests.'
+                }, {
+                    'value': 'ns2.unit.tests.'
+                }]
+            }),
+            call('POST', '/domains/123123/records/A', data={
+                'name': 'www',
+                'ttl': 300,
+                'roundRobin': [{'value': '2.2.3.6'}]}),
+            call('POST', '/domains/123123/records/A', data={
+                'name': 'www.sub',
+                'ttl': 300,
+                'roundRobin': [{'value': '2.2.3.6'}]})
         ])
-
-        self.assertEqual(22, provider._client._request.call_count)
 
         provider._client._request.reset_mock()
 
@@ -489,203 +456,259 @@ class TestConstellixProvider(TestCase):
                 'value': [
                     '3.2.3.4'
                 ]
-            },  {
-                'id': 11189899,
-                'type': 'ALIAS',
-                'name': 'alias',
-                'ttl': 600,
-                'recordOption': 'roundRobin',
-                'value': [{
-                    'value': 'aname.unit.tests.'
-                }]
             }, {
-                "id": 1808520,
-                "type": "A",
-                "name": "www.dynamic",
-                "geolocation": None,
-                "recordOption": "pools",
-                "ttl": 300,
-                "value": [],
-                "pools": [
-                    1808521
-                ]
+                'id': 1808515,
+                'type': 'ALIAS',
+                'name': '',
+                'ttl': 1800,
+                'recordOption': 'roundRobin',
+                'value': [{'value': 'aname.unit.tests.'}]
             }
         ])
 
-        provider._client.pools = Mock(return_value=[{
-            "id": 1808521,
-            "name": "unit.tests.:www.dynamic:A:two",
-            "type": "A",
-            "values": [
-                {
-                    "value": "1.2.3.4",
-                    "weight": 1
-                },
-                {
-                    "value": "1.2.3.5",
-                    "weight": 1
-                }
-            ]
-        }])
-
         # Domain exists, we don't care about return
-        resp.json.side_effect = [
-            [],  # no domains returned during populate
-            [{
+        resp_side_effect = [
+            [],  # delete A record ttl
+            [],  # delete pool www.dynamic:A:two
+            {
                 'id': 123123,
-                'name': 'unit.tests'
-            }],  # domain created in apply
-            [],  # No pools returned during populate
+                'name': 'unit.tests',
+                'hasGeoIP': False
+            },  # domain listed for enabling geo
             [{
-                "id": 1808521,
-                "name": "unit.tests.:www.dynamic:A:one"
-            }]  # pool created in apply
+                'id': 1808521,
+                'name': 'unit.tests.:www.dynamic:A:one'
+            }],  # pool re-created in apply
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            []
         ]
+        resp.json.side_effect = resp_side_effect
 
         wanted = Zone('unit.tests.', [])
         wanted.add_record(Record.new(wanted, 'ttl', {
             'ttl': 300,
             'type': 'A',
-            'value': '3.2.3.4'
+            'value': '3.2.3.5'
         }))
-
-        wanted.add_record(Record.new(wanted, 'www.dynamic', {
+        wanted.add_record(Record.new(wanted, 'www', {
             'ttl': 300,
-            'type': 'A',
+            'type': 'AAAA',
             'values': [
-                '1.2.3.4'
-            ],
-            'dynamic': {
-                'pools': {
-                    'two': {
-                        'values': [{
-                            'value': '1.2.3.4',
-                            'weight': 1
-                        }],
-                    },
-                },
-                'rules': [{
-                    'pool': 'two',
-                }],
-            },
+                '2601:644:500:e210:62f8:1dff:feb8:947a',
+                '2601:642:500:e210:62f8:1dff:feb8:947a'
+            ]
         }))
 
         plan = provider.plan(wanted)
+        # change 1, delete 2, keep 1, add 1
         self.assertEqual(4, len(plan.changes))
         self.assertEqual(4, provider.apply(plan))
 
-        # recreate for update, and deletes for the 2 parts of the other
+        # Check nothing else happened
+
+        # recreate for update
         provider._client._request.assert_has_calls([
+            call('GET', '/domains/123123'),
+            call('DELETE', '/domains/123123/records/ANAME/1808515'),
+            call('DELETE', '/domains/123123/records/A/11189898'),
             call('POST', '/domains/123123/records/A', data={
-                'roundRobin': [{
-                    'value': '3.2.3.4'
-                }],
                 'name': 'ttl',
-                'ttl': 300
-            }),
-            call('PUT', '/pools/A/1808521', data={
-                'name': 'unit.tests.:www.dynamic:A:two',
-                'type': 'A',
-                'numReturn': 1,
-                'minAvailableFailover': 1,
                 'ttl': 300,
-                'values': [{
-                    "value": "1.2.3.4",
-                    "weight": 1
-                }],
-                'id': 1808521,
-                'geofilter': 1
+                'roundRobin': [{
+                    'value': '3.2.3.5'
+                }]
             }),
             call('DELETE', '/domains/123123/records/A/11189897'),
-            call('DELETE', '/domains/123123/records/A/11189898'),
-            call('DELETE', '/domains/123123/records/ANAME/11189899'),
-        ], any_order=True)
+            call('POST', '/domains/123123/records/AAAA', data={
+                'name': 'www',
+                'ttl': 300,
+                'roundRobin': [{
+                    'value': '2601:642:500:e210:62f8:1dff:feb8:947a'
+                }, {
+                    'value': '2601:644:500:e210:62f8:1dff:feb8:947a'
+                }]
+            })
+        ])
 
     def test_apply_healthcheck(self):
         provider = ConstellixProvider('test', 'api', 'secret')
+        expected = Zone('unit.tests.', [])
+
+        # Add a dynamic record with regional health checks
+        expected.add_record(
+            Record.new(expected, 'www.dynamic', {
+                'ttl': 300,
+                'type': 'A',
+                'values': [
+                    '7.7.7.7',
+                    '8.8.8.8'
+                ],
+                'dynamic': {
+                    'pools': {
+                        'two': {
+                            'values': [{
+                                'value': '1.2.3.4',
+                                'weight': 1
+                            }, {
+                                'value': '1.2.3.5',
+                                'weight': 1
+                            }],
+                        },
+                    },
+                    'rules': [{
+                        'pool': 'two',
+                    }],
+                },
+                'octodns': {
+                    'constellix': {
+                        'healthcheck': {
+                            'sonar_port': 80,
+                            'sonar_regions': [
+                                'ASIAPAC',
+                                'EUROPE'
+                            ],
+                            'sonar_type': 'TCP'
+                        }
+                    }
+                }
+            })
+        )
 
         resp = Mock()
         resp.json = Mock()
         provider._client._request = Mock(return_value=resp)
 
         # non-existent domain, create everything
-        resp.json.side_effect = [
+        resp_side_effect = [
             [],  # no domains returned during populate
             [{
                 'id': 123123,
                 'name': 'unit.tests'
             }],  # domain created in apply
-            [],  # No pools returned during populate
+            [],  # no pools returned during populate
             [{
-                "id": 1808520,
-                "name": "unit.tests.:www.dynamic:A:two",
-            }]   # pool created in apply
+                'id': 1808521,
+                'name': 'unit.tests.:www.dynamic:A:two',
+            }],  # pool created in apply
+            [{
+                'id': 1,
+                'name': 'World (Default)',
+                'geoipContinents': ['default']
+            }],  # geofilters returned
+            [{
+                'id': 3049,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'geoipContinents': ['default']
+            }],  # geofilter created in apply
+            {
+                'id': 123123,
+                'name': 'unit.tests',
+                'hasGeoIP': False
+            },  # domain listed for enabling geo
+            [],  # enabling geo
+            [{
+                'id': 1808516,
+                'type': 'A',
+                'name': 'www.dynamic',
+                'ttl': 300,
+                'recordOption': 'roundRobin',
+                'value': [
+                    '7.7.7.7',
+                    '8.8.8.8',
+                ]
+            }],  # global default entry created in apply
+            [{
+                'id': 1808521,
+                'type': 'A',
+                'name': 'www.dynamic',
+                'geolocation': {
+                    'geoipFilter': 1
+                },
+                'ttl': 300,
+                'recordOption': 'pool',
+                'value': [],
+                'pools': ['1']
+            }]  # pool with geo entry created in apply
         ]
+        resp.json.side_effect = resp_side_effect
 
         sonar_resp = Mock()
         sonar_resp.json = Mock()
         type(sonar_resp).headers = PropertyMock(return_value={
-            "Location": "http://api.sonar.constellix.com/rest/api/tcp/52906"
+            'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52906'
         })
         sonar_resp.headers = Mock()
         provider._sonar._request = Mock(return_value=sonar_resp)
 
-        sonar_resp.json.side_effect = [
+        sonar_resp_side_effect = [
             [{
-                "id": 1,
-                "name": "USWAS01",
-                "label": "Site 1",
-                "location": "Washington, DC, U.S.A",
-                "country": "U.S.A",
-                "region": "ASIAPAC"
+                'id': 1,
+                'name': 'USWAS01',
+                'label': 'Site 1',
+                'location': 'Washington, DC, U.S.A',
+                'country': 'U.S.A',
+                'region': 'ASIAPAC'
             }, {
-                "id": 23,
-                "name": "CATOR01",
-                "label": "Site 1",
-                "location": "Toronto,Canada",
-                "country": "Canada",
-                "region": "EUROPE"
+                'id': 23,
+                'name': 'CATOR01',
+                'label': 'Site 1',
+                'location': 'Toronto,Canada',
+                'country': 'Canada',
+                'region': 'EUROPE'
             }, {
-                "id": 25,
-                "name": "CATOR01",
-                "label": "Site 1",
-                "location": "Toronto,Canada",
-                "country": "Canada",
-                "region": "OCEANIA"
+                'id': 25,
+                'name': 'CATOR01',
+                'label': 'Site 1',
+                'location': 'Toronto,Canada',
+                'country': 'Canada',
+                'region': 'OCEANIA'
             }],  # available agents
             [{
-                "id": 52,
-                "name": "unit.tests.:www.dynamic:A:two-1.2.3.4"
+                'id': 52,
+                'name': 'unit.tests.:www.dynamic:A:two-1.2.3.4'
             }],  # initial checks
             {
-                "type": 'TCP'
-            },  # check type
-            {
-                "id": 52906,
-                "name": "unit.tests.:www.dynamic:A:two-1.2.3.4"
+                'type': 'TCP'
             },
             {
-                "id": 52907,
-                "name": "unit.tests.:www.dynamic:A:two-1.2.3.5"
-            }
+                'id': 52906,
+                'name': 'unit.tests.:www.dynamic:A:two-1.2.3.4'
+            },  # check_create GET data
+            {
+                'id': 52907,
+                'name': 'unit.tests.:www.dynamic:A:two-1.2.3.5'
+            }  # check_create GET data
         ]
+        sonar_resp.json.side_effect = sonar_resp_side_effect
 
-        plan = provider.plan(self.expected_healthcheck)
+        plan = provider.plan(expected)
 
-        # No root NS, no ignored, no excluded, no unsupported
-        n = len(self.expected_healthcheck.records) - 8
+        n = len(expected.records)
         self.assertEqual(n, len(plan.changes))
         self.assertEqual(n, provider.apply(plan))
 
+        # Check nothing else happened
+        self.assertEqual(len(resp_side_effect),
+                         provider._client._request.call_count)
+
+        # Check what happened
         provider._client._request.assert_has_calls([
             # get all domains to build the cache
             call('GET', '/domains'),
             # created the domain
-            call('POST', '/domains', data={'names': ['unit.tests']})
-        ])
-
-        # Check we tried to get our pool
-        provider._client._request.assert_has_calls([
+            call('POST', '/domains', data={'names': ['unit.tests']}),
             # get all pools to build the cache
             call('GET', '/pools/A'),
             # created the pool
@@ -694,187 +717,145 @@ class TestConstellixProvider(TestCase):
                 'type': 'A',
                 'numReturn': 1,
                 'minAvailableFailover': 1,
-                'ttl': 300,
                 'values': [{
-                    "value": "1.2.3.4",
-                    "weight": 1,
-                    "checkId": 52906,
-                    "policy": 'followsonar'
+                    'value': '1.2.3.4',
+                    'weight': 1,
+                    'checkId': 52906,
+                    'policy': 'followsonar'
                 }, {
-                    "value": "1.2.3.5",
-                    "weight": 1,
-                    "checkId": 52907,
-                    "policy": 'followsonar'
+                    'value': '1.2.3.5',
+                    'weight': 1,
+                    'checkId': 52907,
+                    'policy': 'followsonar'
                 }]
+            }),
+            call('GET', '/geoFilters'),
+            call('POST', '/geoFilters', data={
+                'filterRulesLimit': 100,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'geoipContinents': ['default']
+            }),
+            call('GET', '/domains/123123'),
+            call('PUT', '/domains/123123', data={'hasGeoIP': True}),
+            call('POST', '/domains/123123/records/A', data={
+                'name': 'www.dynamic',
+                'ttl': 300,
+                'roundRobin': [
+                    {'value': '7.7.7.7'},
+                    {'value': '8.8.8.8'}
+                ],
+                'geolocation': {
+                    'geoipUserRegion': [1]
+                }
+            }),
+            call('POST', '/domains/123123/records/A', data={
+                'name': 'www.dynamic',
+                'ttl': 300,
+                'recordOption': 'pools',
+                'pools': [1808521],
+                'geolocation': {
+                    'geoipUserRegion': [3049]
+                }
             })
         ])
 
-        # These two checks are broken up so that ordering doesn't break things.
-        # Python3 doesn't make the calls in a consistent order so different
-        # things follow the GET / on different runs
-        provider._client._request.assert_has_calls([
-            call('POST', '/domains/123123/records/SRV', data={
-                'roundRobin': [{
-                    'priority': 10,
-                    'weight': 20,
-                    'value': 'foo-1.unit.tests.',
-                    'port': 30
-                }, {
-                    'priority': 12,
-                    'weight': 20,
-                    'value': 'foo-2.unit.tests.',
-                    'port': 30
-                }],
-                'name': '_srv._tcp',
-                'ttl': 600,
+        # Check nothing else happened in sonar:
+        # +2 for two check_create calls, +1 for one check_delete call
+        # these methods have two API calls but only one .json() call
+        self.assertEqual(len(sonar_resp_side_effect) + 3,
+                         provider._sonar._request.call_count)
+
+        # Check what happened in sonar
+        provider._sonar._request.assert_has_calls([
+            call('GET', '/system/sites'),
+            call('GET', '/tcp'),
+            call('GET', '/check/type/52'),
+            call('DELETE', '/tcp/52'),  # recreate, same name
+            call('POST', '/tcp', data={
+                'name': 'unit.tests.:www.dynamic:A:two-1.2.3.4',
+                'host': '1.2.3.4',
+                'port': 80,
+                'checkSites': [1],
+                'interval': 'ONEMINUTE',
+                'ipVersion': 'IPV4'
+            }),   # only returns 201 / created with new ID in header
+            call('GET', '/tcp/52906', data={
+                'name': 'unit.tests.:www.dynamic:A:two-1.2.3.4',
+                'host': '1.2.3.4',
+                'port': 80,
+                'checkSites': [1],
+                'interval': 'ONEMINUTE',
+                'ipVersion': 'IPV4'
             }),
+            call('POST', '/tcp', data={
+                'name': 'unit.tests.:www.dynamic:A:two-1.2.3.5',
+                'host': '1.2.3.5',
+                'port': 80,
+                'checkSites': [1],
+                'interval': 'ONEMINUTE',
+                'ipVersion': 'IPV4'
+            }),  # only returns 201 / created with new ID in header
+            call('GET', '/tcp/52906', data={
+                'name': 'unit.tests.:www.dynamic:A:two-1.2.3.5',
+                'host': '1.2.3.5',
+                'port': 80,
+                'checkSites': [1],
+                'interval': 'ONEMINUTE',
+                'ipVersion': 'IPV4'
+            })
         ])
-
-        self.assertEqual(22, provider._client._request.call_count)
-
-        provider._client._request.reset_mock()
-
-        provider._client.records = Mock(return_value=[
-            {
-                'id': 11189897,
-                'type': 'A',
-                'name': 'www',
-                'ttl': 300,
-                'recordOption': 'roundRobin',
-                'value': [
-                    '1.2.3.4',
-                    '2.2.3.4',
-                ]
-            }, {
-                'id': 11189898,
-                'type': 'A',
-                'name': 'ttl',
-                'ttl': 600,
-                'recordOption': 'roundRobin',
-                'value': [
-                    '3.2.3.4'
-                ]
-            },  {
-                'id': 11189899,
-                'type': 'ALIAS',
-                'name': 'alias',
-                'ttl': 600,
-                'recordOption': 'roundRobin',
-                'value': [{
-                    'value': 'aname.unit.tests.'
-                }]
-            }, {
-                "id": 1808520,
-                "type": "A",
-                "name": "www.dynamic",
-                "geolocation": None,
-                "recordOption": "pools",
-                "ttl": 300,
-                "value": [],
-                "pools": [
-                    1808521
-                ]
-            }
-        ])
-
-        provider._client.pools = Mock(return_value=[{
-            "id": 1808521,
-            "name": "unit.tests.:www.dynamic:A:two",
-            "type": "A",
-            "values": [
-                {
-                    "value": "1.2.3.4",
-                    "weight": 1
-                },
-                {
-                    "value": "1.2.3.5",
-                    "weight": 1
-                }
-            ]
-        }])
-
-        # Domain exists, we don't care about return
-        resp.json.side_effect = [
-            [],  # no domains returned during populate
-            [{
-                'id': 123123,
-                'name': 'unit.tests'
-            }],  # domain created in apply
-            [],  # No pools returned during populate
-            [{
-                "id": 1808521,
-                "name": "unit.tests.:www.dynamic:A:one"
-            }]  # pool created in apply
-        ]
-
-        wanted = Zone('unit.tests.', [])
-        wanted.add_record(Record.new(wanted, 'ttl', {
-            'ttl': 300,
-            'type': 'A',
-            'value': '3.2.3.4'
-        }))
-
-        wanted.add_record(Record.new(wanted, 'www.dynamic', {
-            'ttl': 300,
-            'type': 'A',
-            'values': [
-                '1.2.3.4'
-            ],
-            'dynamic': {
-                'pools': {
-                    'two': {
-                        'values': [{
-                            'value': '1.2.3.4',
-                            'weight': 1
-                        }],
-                    },
-                },
-                'rules': [{
-                    'pool': 'two',
-                }],
-            },
-        }))
-
-        plan = provider.plan(wanted)
-        self.assertEqual(4, len(plan.changes))
-        self.assertEqual(4, provider.apply(plan))
-
-        # recreate for update, and deletes for the 2 parts of the other
-        provider._client._request.assert_has_calls([
-            call('POST', '/domains/123123/records/A', data={
-                'roundRobin': [{
-                    'value': '3.2.3.4'
-                }],
-                'name': 'ttl',
-                'ttl': 300
-            }),
-            call('PUT', '/pools/A/1808521', data={
-                'name': 'unit.tests.:www.dynamic:A:two',
-                'type': 'A',
-                'numReturn': 1,
-                'minAvailableFailover': 1,
-                'ttl': 300,
-                'values': [{
-                    "value": "1.2.3.4",
-                    "weight": 1
-                }],
-                'id': 1808521,
-                'geofilter': 1
-            }),
-            call('DELETE', '/domains/123123/records/A/11189897'),
-            call('DELETE', '/domains/123123/records/A/11189898'),
-            call('DELETE', '/domains/123123/records/ANAME/11189899'),
-        ], any_order=True)
 
     def test_apply_healthcheck_world(self):
         provider = ConstellixProvider('test', 'api', 'secret')
+        expected = Zone('unit.tests.', [])
+
+        # Add a dynamic record with WORLD healthcheck
+        expected.add_record(
+            Record.new(expected, 'www.dynamic', {
+                'ttl': 300,
+                'type': 'AAAA',
+                'values': [
+                    '2601:644:500:e210:62f8:1dff:feb8:947a',
+                    '2601:642:500:e210:62f8:1dff:feb8:947a'
+                ],
+                'dynamic': {
+                    'pools': {
+                        'two': {
+                            'values': [{
+                                'value':
+                                    '2601:642:500:e210:62f8:1dff:feb8:9472',
+                                'weight': 1
+                            }, {
+                                'value':
+                                    '2601:642:500:e210:62f8:1dff:feb8:9473',
+                                'weight': 1
+                            }],
+                        },
+                    },
+                    'rules': [{
+                        'pool': 'two',
+                    }],
+                },
+                'octodns': {
+                    'constellix': {
+                        'healthcheck': {
+                            'sonar_port': 80,
+                            'sonar_regions': [
+                                'WORLD'
+                            ],
+                            'sonar_type': 'HTTP'
+                        }
+                    }
+                }
+            })
+        )
 
         resp = Mock()
         resp.json = Mock()
         provider._client._request = Mock(return_value=resp)
 
         # non-existent domain, create everything
-        resp.json.side_effect = [
+        resp_side_effect = [
             [],  # no domains returned during populate
             [{
                 'id': 123123,
@@ -882,50 +863,68 @@ class TestConstellixProvider(TestCase):
             }],  # domain created in apply
             [],  # No pools returned during populate
             [{
-                "id": 1808520,
-                "name": "unit.tests.:www.dynamic:A:two",
-            }]   # pool created in apply
+                'id': 1808521,
+                'name': 'unit.tests.:www.dynamic:A:two',
+            }],   # pool created in apply
+            [{
+                'id': 1,
+                'name': 'World (Default)',
+                'geoipContinents': ['default']
+            }],  # geofilters returned
+            [{
+                'id': 9049,
+                'name': 'unit.tests.:www.dynamic:AAAA:two',
+                'geoipContinents': ['default']
+            }],  # geofilter created in apply
+            {
+                'id': 123123,
+                'name': 'unit.tests',
+                'hasGeoIP': False
+            },  # domain listed for enabling geo
+            [],  # enabling geo
+            [],  # create global default AAAA record
+            []  # create pooled AAAA record
         ]
+        resp.json.side_effect = resp_side_effect
 
         sonar_resp = Mock()
         sonar_resp.json = Mock()
         type(sonar_resp).headers = PropertyMock(return_value={
-            "Location": "http://api.sonar.constellix.com/rest/api/tcp/52906"
+            'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52906'
         })
         sonar_resp.headers = Mock()
         provider._sonar._request = Mock(return_value=sonar_resp)
 
         sonar_resp.json.side_effect = [
             [{
-                "id": 1,
-                "name": "USWAS01",
-                "label": "Site 1",
-                "location": "Washington, DC, U.S.A",
-                "country": "U.S.A",
-                "region": "ASIAPAC"
+                'id': 1,
+                'name': 'USWAS01',
+                'label': 'Site 1',
+                'location': 'Washington, DC, U.S.A',
+                'country': 'U.S.A',
+                'region': 'ASIAPAC'
             }, {
-                "id": 23,
-                "name": "CATOR01",
-                "label": "Site 1",
-                "location": "Toronto,Canada",
-                "country": "Canada",
-                "region": "EUROPE"
+                'id': 23,
+                'name': 'CATOR01',
+                'label': 'Site 1',
+                'location': 'Toronto,Canada',
+                'country': 'Canada',
+                'region': 'EUROPE'
             }],  # available agents
             [],  # no checks
             {
-                "id": 52906,
-                "name": "check1"
+                'id': 52906,
+                'name': 'check1'
             },
             {
-                "id": 52907,
-                "name": "check2"
+                'id': 52907,
+                'name': 'check2'
             }
         ]
 
-        plan = provider.plan(self.expected_healthcheck_world)
+        plan = provider.plan(expected)
 
-        # No root NS, no ignored, no excluded, no unsupported
-        n = len(self.expected_healthcheck.records) - 8
+        n = len(expected.records)
         self.assertEqual(n, len(plan.changes))
         self.assertEqual(n, provider.apply(plan))
 
@@ -946,438 +945,50 @@ class TestConstellixProvider(TestCase):
                 'type': 'AAAA',
                 'numReturn': 1,
                 'minAvailableFailover': 1,
-                'ttl': 300,
                 'values': [{
-                    "value": "2601:642:500:e210:62f8:1dff:feb8:947a",
-                    "weight": 1,
-                    "checkId": 52906,
-                    "policy": 'followsonar'
+                    'value': '2601:642:500:e210:62f8:1dff:feb8:9472',
+                    'weight': 1,
+                    'checkId': 52906,
+                    'policy': 'followsonar'
                 }, {
-                    "value": "2601:644:500:e210:62f8:1dff:feb8:947a",
-                    "weight": 1,
-                    "checkId": 52907,
-                    "policy": 'followsonar'
+                    'value': '2601:642:500:e210:62f8:1dff:feb8:9473',
+                    'weight': 1,
+                    'checkId': 52907,
+                    'policy': 'followsonar'
                 }]
             })
         ])
 
-        # These two checks are broken up so that ordering doesn't break things.
-        # Python3 doesn't make the calls in a consistent order so different
-        # things follow the GET / on different runs
+        # Check we updated our record
         provider._client._request.assert_has_calls([
-            call('POST', '/domains/123123/records/SRV', data={
+            # updated the record
+            call('POST', '/domains/123123/records/AAAA', data={
+                'name': 'www.dynamic',
+                'ttl': 300,
                 'roundRobin': [{
-                    'priority': 10,
-                    'weight': 20,
-                    'value': 'foo-1.unit.tests.',
-                    'port': 30
+                    'value': '2601:642:500:e210:62f8:1dff:feb8:947a'
                 }, {
-                    'priority': 12,
-                    'weight': 20,
-                    'value': 'foo-2.unit.tests.',
-                    'port': 30
+                    'value': '2601:644:500:e210:62f8:1dff:feb8:947a'
                 }],
-                'name': '_srv._tcp',
-                'ttl': 600,
-            }),
+                'geolocation': {'geoipUserRegion': [1]}
+            })
         ])
 
-        self.assertEqual(22, provider._client._request.call_count)
-
-        provider._client._request.reset_mock()
-
-        provider._client.records = Mock(return_value=[
-            {
-                'id': 11189897,
-                'type': 'A',
-                'name': 'www',
-                'ttl': 300,
-                'recordOption': 'roundRobin',
-                'value': [
-                    '1.2.3.4',
-                    '2.2.3.4',
-                ]
-            }, {
-                'id': 11189898,
-                'type': 'A',
-                'name': 'ttl',
-                'ttl': 600,
-                'recordOption': 'roundRobin',
-                'value': [
-                    '3.2.3.4'
-                ]
-            },  {
-                'id': 11189899,
-                'type': 'ALIAS',
-                'name': 'alias',
-                'ttl': 600,
-                'recordOption': 'roundRobin',
-                'value': [{
-                    'value': 'aname.unit.tests.'
-                }]
-            }, {
-                "id": 1808520,
-                "type": "A",
-                "name": "www.dynamic",
-                "geolocation": None,
-                "recordOption": "pools",
-                "ttl": 300,
-                "value": [],
-                "pools": [
-                    1808521
-                ]
-            }
-        ])
-
-        provider._client.pools = Mock(return_value=[{
-            "id": 1808521,
-            "name": "unit.tests.:www.dynamic:A:two",
-            "type": "A",
-            "values": [
-                {
-                    "value": "1.2.3.4",
-                    "weight": 1
-                },
-                {
-                    "value": "1.2.3.5",
-                    "weight": 1
-                }
-            ]
-        }])
-
-        # Domain exists, we don't care about return
-        resp.json.side_effect = [
-            [],  # no domains returned during populate
-            [{
-                'id': 123123,
-                'name': 'unit.tests'
-            }],  # domain created in apply
-            [],  # No pools returned during populate
-            [{
-                "id": 1808521,
-                "name": "unit.tests.:www.dynamic:A:one"
-            }]  # pool created in apply
-        ]
-
-        wanted = Zone('unit.tests.', [])
-        wanted.add_record(Record.new(wanted, 'ttl', {
-            'ttl': 300,
-            'type': 'A',
-            'value': '3.2.3.4'
-        }))
-
-        wanted.add_record(Record.new(wanted, 'www.dynamic', {
-            'ttl': 300,
-            'type': 'A',
-            'values': [
-                '1.2.3.4'
-            ],
-            'dynamic': {
-                'pools': {
-                    'two': {
-                        'values': [{
-                            'value': '1.2.3.4',
-                            'weight': 1
-                        }],
-                    },
-                },
-                'rules': [{
-                    'pool': 'two',
-                }],
-            },
-        }))
-
-        plan = provider.plan(wanted)
-        self.assertEqual(4, len(plan.changes))
-        self.assertEqual(4, provider.apply(plan))
-
-        # recreate for update, and deletes for the 2 parts of the other
-        provider._client._request.assert_has_calls([
-            call('POST', '/domains/123123/records/A', data={
-                'roundRobin': [{
-                    'value': '3.2.3.4'
-                }],
-                'name': 'ttl',
-                'ttl': 300
-            }),
-            call('PUT', '/pools/A/1808521', data={
-                'name': 'unit.tests.:www.dynamic:A:two',
-                'type': 'A',
-                'numReturn': 1,
-                'minAvailableFailover': 1,
-                'ttl': 300,
-                'values': [{
-                    "value": "1.2.3.4",
-                    "weight": 1
-                }],
-                'id': 1808521,
-                'geofilter': 1
-            }),
-            call('DELETE', '/domains/123123/records/A/11189897'),
-            call('DELETE', '/domains/123123/records/A/11189898'),
-            call('DELETE', '/domains/123123/records/ANAME/11189899'),
-        ], any_order=True)
+        # Check nothing else happened
+        self.assertEqual(len(resp_side_effect),
+                         provider._client._request.call_count)
 
     def test_apply_dynamic(self):
         provider = ConstellixProvider('test', 'api', 'secret')
+        expected = Zone('unit.tests.', [])
 
-        resp = Mock()
-        resp.json = Mock()
-        provider._client._request = Mock(return_value=resp)
-
-        # non-existent domain, create everything
-        resp.json.side_effect = [
-            [],  # no domains returned during populate
-            [{
-                'id': 123123,
-                'name': 'unit.tests'
-            }],  # domain created in apply
-            [],  # No pools returned during populate
-            [{
-                "id": 1808521,
-                "name": "unit.tests.:www.dynamic:A:one"
-            }],  # pool created in apply
-            [],  # no geofilters returned during populate
-            [{
-                "id": 5303,
-                "name": "unit.tests.:www.dynamic:A:one",
-                "filterRulesLimit": 100,
-                "geoipContinents": ["AS", "OC"],
-                "geoipCountries": ["ES", "SE", "UA"],
-                "regions": [
-                    {
-                        "continentCode": "NA",
-                        "countryCode": "CA",
-                        "regionCode": "NL"
-                    }
-                ]
-            }],  # geofilters created in applly
-            [{
-                "id": 1808520,
-                "name": "unit.tests.:www.dynamic:A:two",
-            }],  # pool created in apply
-            {
-                'id': 123123,
-                'name': 'unit.tests',
-                'hasGeoIP': False
-            },  # domain listed for enabling geo
-            []  # enabling geo
-        ]
-
-        plan = provider.plan(self.expected_dynamic)
-
-        # No ignored, no excluded, no unsupported
-        n = len(self.expected_dynamic.records) - 7
-        self.assertEqual(n, len(plan.changes))
-        self.assertEqual(n, provider.apply(plan))
-
-        provider._client._request.assert_has_calls([
-            # get all domains to build the cache
-            call('GET', '/domains'),
-            # created the domain
-            call('POST', '/domains', data={'names': ['unit.tests']})
-        ])
-#
-        # Check we tried to get our pool
-        provider._client._request.assert_has_calls([
-            call('GET', '/pools/A'),
-            call('POST', '/pools/A', data={
-                'name': 'unit.tests.:www.dynamic:A:one',
-                'type': 'A',
-                'numReturn': 1,
-                'minAvailableFailover': 1,
-                'ttl': 300,
-                'values': [{
-                    'value': '1.2.3.6',
-                    'weight': 1
-                }, {
-                    'value': '1.2.3.7',
-                    'weight': 1}]
-            }),
-            call('GET', '/geoFilters'),
-            call('POST', '/geoFilters', data={
-                'filterRulesLimit': 100,
-                'name': 'unit.tests.:www.dynamic:A:one',
-                'geoipContinents': ['AS', 'OC'],
-                'geoipCountries': ['ES', 'SE', 'UA'],
-                'regions': [{
-                    'continentCode': 'NA',
-                    'countryCode': 'CA',
-                    'regionCode': 'NL'}]
-            }),
-            call('POST', '/pools/A', data={
-                'name': 'unit.tests.:www.dynamic:A:two',
-                'type': 'A',
-                'numReturn': 1,
-                'minAvailableFailover': 1,
-                'ttl': 300,
-                'values': [{
-                    'value': '1.2.3.4',
-                    'weight': 1
-                }, {
-                    'value': '1.2.3.5',
-                    'weight': 1}]
-            })
-        ])
-
-        # These two checks are broken up so that ordering doesn't break things.
-        # Python3 doesn't make the calls in a consistent order so different
-        # things follow the GET / on different runs
-        provider._client._request.assert_has_calls([
-            call('POST', '/domains/123123/records/SRV', data={
-                'roundRobin': [{
-                    'priority': 10,
-                    'weight': 20,
-                    'value': 'foo-1.unit.tests.',
-                    'port': 30
-                }, {
-                    'priority': 12,
-                    'weight': 20,
-                    'value': 'foo-2.unit.tests.',
-                    'port': 30
-                }],
-                'name': '_srv._tcp',
-                'ttl': 600,
-            }),
-        ])
-
-        self.assertEqual(28, provider._client._request.call_count)
-
-        provider._client._request.reset_mock()
-
-        provider._client.records = Mock(return_value=[
-            {
-                'id': 11189897,
-                'type': 'A',
-                'name': 'www',
-                'ttl': 300,
-                'recordOption': 'roundRobin',
-                'value': [
-                    '1.2.3.4',
-                    '2.2.3.4',
-                ]
-            }, {
-                'id': 11189898,
-                'type': 'A',
-                'name': 'ttl',
-                'ttl': 600,
-                'recordOption': 'roundRobin',
-                'value': [
-                    '3.2.3.4'
-                ]
-            }, {
-                'id': 11189899,
-                'type': 'ALIAS',
-                'name': 'alias',
-                'ttl': 600,
-                'recordOption': 'roundRobin',
-                'value': [{
-                    'value': 'aname.unit.tests.'
-                }]
-            }, {
-                "id": 1808520,
-                "type": "A",
-                "name": "www.dynamic",
-                "geolocation": {
-                    "geoipFilter": 1
-                },
-                "recordOption": "pools",
-                "ttl": 300,
-                "value": [],
-                "pools": [
-                    1808521
-                ]
-            }, {
-                "id": 1808521,
-                "type": "A",
-                "name": "www.dynamic",
-                "geolocation": {
-                    "geoipFilter": 5303
-                },
-                "recordOption": "pools",
-                "ttl": 300,
-                "value": [],
-                "pools": [
-                    1808522
-                ]
-            }
-        ])
-
-        provider._client.pools = Mock(return_value=[
-            {
-                "id": 1808521,
-                "name": "unit.tests.:www.dynamic:A:two",
-                "type": "A",
-                "values": [
-                    {
-                        "value": "1.2.3.4",
-                        "weight": 1
-                    },
-                    {
-                        "value": "1.2.3.5",
-                        "weight": 1
-                    }
-                ]
-            },
-            {
-                "id": 1808522,
-                "name": "unit.tests.:www.dynamic:A:one",
-                "type": "A",
-                "values": [
-                    {
-                        "value": "1.2.3.6",
-                        "weight": 1
-                    },
-                    {
-                        "value": "1.2.3.7",
-                        "weight": 1
-                    }
-                ]
-            }
-        ])
-
-        provider._client.geofilters = Mock(return_value=[
-            {
-                "id": 5303,
-                "name": "unit.tests.:www.dynamic:A:one",
-                "filterRulesLimit": 100,
-                "geoipContinents": ["AS", "OC"],
-                "geoipCountries": ["ES", "SE", "UA"],
-                "regions": [
-                    {
-                        "continentCode": "NA",
-                        "countryCode": "CA",
-                        "regionCode": "NL"
-                    }
-                ]
-            }
-        ])
-
-        # Domain exists, we don't care about return
-        resp.json.side_effect = [
-            [],
-            [],
-            [],
-            [],
-            {
-                'id': 123123,
-                'name': 'unit.tests',
-                'hasGeoIP': True
-            }  # domain listed for enabling geo
-        ]
-
-        wanted = Zone('unit.tests.', [])
-        wanted.add_record(Record.new(wanted, 'ttl', {
-            'ttl': 300,
-            'type': 'A',
-            'value': '3.2.3.4'
-        }))
-
-        wanted.add_record(Record.new(wanted, 'www.dynamic', {
+        # Add a dynamic record.
+        expected.add_record(Record.new(expected, 'www.dynamic', {
             'ttl': 300,
             'type': 'A',
             'values': [
-                '1.2.3.4'
+                '1.2.3.4',
+                '1.2.3.5'
             ],
             'dynamic': {
                 'pools': {
@@ -1394,7 +1005,10 @@ class TestConstellixProvider(TestCase):
                     'two': {
                         'values': [{
                             'value': '1.2.3.4',
-                            'weight': 1
+                            'weight': 2
+                        }, {
+                            'value': '1.2.3.5',
+                            'weight': 4
                         }],
                     },
                 },
@@ -1411,44 +1025,110 @@ class TestConstellixProvider(TestCase):
                 }, {
                     'pool': 'two',
                 }],
-            },
+            }
         }))
 
-        plan = provider.plan(wanted)
-        self.assertEqual(4, len(plan.changes))
-        self.assertEqual(4, provider.apply(plan))
+        resp = Mock()
+        resp.json = Mock()
+        provider._client._request = Mock(return_value=resp)
 
-        # recreate for update, and deletes for the 2 parts of the other
+        # non-existent domain, create everything
+        resp_side_effect = [
+            [],  # no domains returned during populate
+            [{
+                'id': 123123,
+                'name': 'unit.tests'
+            }],  # domain created in apply
+            [],  # No pools returned during populate
+            [{
+                'id': 1808522,
+                'name': 'unit.tests.:www.dynamic:A:one'
+            }],  # pool created in apply
+            [{
+                'id': 1808521,
+                'name': 'unit.tests.:www.dynamic:A:two'
+            }],  # pool created in apply
+            [{
+                'id': 1,
+                'name': 'World (Default)',
+                'geoipContinents': ['default']
+            }],  # geofilters returned in apply
+            [{
+                'id': 5303,
+                'name': 'unit.tests.:www.dynamic:A:one',
+                'filterRulesLimit': 100,
+                'geoipContinents': ['AS', 'OC'],
+                'geoipCountries': ['ES', 'SE', 'UA'],
+                'regions': [
+                    {
+                        'continentCode': 'NA',
+                        'countryCode': 'CA',
+                        'regionCode': 'NL'
+                    }
+                ]
+            }],  # geofilter created in apply
+            [{
+                'id': 9303,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'filterRulesLimit': 100,
+                'geoipContinents': ['default'],
+            }],  # geofilter created in apply
+            {
+                'id': 123123,
+                'name': 'unit.tests',
+                'hasGeoIP': False
+            },  # domain listed for enabling geo
+            [],  # enabling geo
+            [],
+            [],
+            []
+        ]
+        resp.json.side_effect = resp_side_effect
+
+        plan = provider.plan(expected)
+
+        # No root NS, no ignored, no excluded, no unsupported
+        n = len(expected.records)
+        self.assertEqual(n, len(plan.changes))
+        self.assertEqual(n, provider.apply(plan))
+
+        # Check that nothing else happened in apply.
+        self.assertEqual(len(resp_side_effect),
+                         provider._client._request.call_count)
+
+        # Check what happened in apply.
         provider._client._request.assert_has_calls([
-            call('POST', '/domains/123123/records/A', data={
-                'roundRobin': [{
-                    'value': '3.2.3.4'
-                }],
-                'name': 'ttl',
-                'ttl': 300
-            }),
-
-            call('DELETE', '/domains/123123/records/A/1808521'),
-            call('DELETE', '/geoFilters/5303'),
-            call('DELETE', '/pools/A/1808522'),
-            call('DELETE', '/domains/123123/records/A/1808520'),
-            call('DELETE', '/pools/A/1808521'),
-            call('DELETE', '/domains/123123/records/ANAME/11189899'),
-
-            call('PUT', '/pools/A/1808522', data={
+            # get all domains to build the cache
+            call('GET', '/domains'),
+            # created the domain
+            call('POST', '/domains', data={'names': ['unit.tests']}),
+            call('GET', '/pools/A'),
+            call('POST', '/pools/A', data={
                 'name': 'unit.tests.:www.dynamic:A:one',
                 'type': 'A',
                 'numReturn': 1,
                 'minAvailableFailover': 1,
-                'ttl': 300,
-                'values': [
-                    {'value': '1.2.3.6', 'weight': 1},
-                    {'value': '1.2.3.7', 'weight': 1}],
-                'id': 1808522,
-                'geofilter': 5303
+                'values': [{
+                    'value': '1.2.3.6',
+                    'weight': 1
+                }, {
+                    'value': '1.2.3.7',
+                    'weight': 1}]
             }),
-
-            call('PUT', '/geoFilters/5303', data={
+            call('POST', '/pools/A', data={
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'type': 'A',
+                'numReturn': 1,
+                'minAvailableFailover': 1,
+                'values': [{
+                    'value': '1.2.3.4',
+                    'weight': 2
+                }, {
+                    'value': '1.2.3.5',
+                    'weight': 4}]
+            }),
+            call('GET', '/geoFilters'),
+            call('POST', '/geoFilters', data={
                 'filterRulesLimit': 100,
                 'name': 'unit.tests.:www.dynamic:A:one',
                 'geoipContinents': ['AS', 'OC'],
@@ -1456,42 +1136,332 @@ class TestConstellixProvider(TestCase):
                 'regions': [{
                     'continentCode': 'NA',
                     'countryCode': 'CA',
-                    'regionCode': 'NL'}],
-                'id': 5303
+                    'regionCode': 'NL'}]
             }),
+            call('POST', '/geoFilters', data={
+                'filterRulesLimit': 100,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'geoipContinents': ['default']
+            }),
+            call('GET', '/domains/123123'),
+            call('PUT', '/domains/123123', data={'hasGeoIP': True}),
+            call('POST', '/domains/123123/records/A', data={
+                'name': 'www.dynamic',
+                'ttl': 300,
+                'roundRobin': [{'value': '1.2.3.4'}, {'value': '1.2.3.5'}],
+                'geolocation': {'geoipUserRegion': [1]}
+            }),
+            call('POST', '/domains/123123/records/A', data={
+                'name': 'www.dynamic',
+                'ttl': 300,
+                'recordOption': 'pools',
+                'pools': [1808522],
+                'geolocation': {'geoipUserRegion': [5303]}
+            }),
+            call('POST', '/domains/123123/records/A', data={
+                'name': 'www.dynamic',
+                'ttl': 300,
+                'recordOption': 'pools',
+                'pools': [1808521],
+                'geolocation': {'geoipUserRegion': [9303]}
+            })
+        ])
 
+        provider._client._request.reset_mock()
+        resp.json.reset_mock()
+
+        provider._client.records = Mock(return_value=[
+            {
+                'id': 1808518,
+                'type': 'A',
+                'name': 'www.dynamic',
+                'geolocation': {
+                    'geoipFilter': 1
+                },
+                'ttl': 300,
+                'recordOption': 'roundRobin',
+                'value': [
+                    '1.2.3.4',
+                    '1.2.3.5',
+                ]
+            }, {
+                'id': 1808520,
+                'type': 'A',
+                'name': 'www.dynamic',
+                'geolocation': {
+                    'geoipFilter': 9303
+                },
+                'recordOption': 'pools',
+                'ttl': 300,
+                'value': [],
+                'pools': [
+                    1808521
+                ]
+            }, {
+                'id': 1808521,
+                'type': 'A',
+                'name': 'www.dynamic',
+                'geolocation': {
+                    'geoipFilter': 5303
+                },
+                'recordOption': 'pools',
+                'ttl': 300,
+                'value': [],
+                'pools': [
+                    1808522
+                ]
+            }
+        ])
+
+        provider._client.pools = Mock(return_value=[
+            {
+                'id': 1808521,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'type': 'A',
+                'values': [
+                    {
+                        'value': '1.2.3.4',
+                        'weight': 2
+                    },
+                    {
+                        'value': '1.2.3.5',
+                        'weight': 4
+                    }
+                ]
+            },
+            {
+                'id': 1808522,
+                'name': 'unit.tests.:www.dynamic:A:one',
+                'type': 'A',
+                'values': [
+                    {
+                        'value': '1.2.3.6',
+                        'weight': 1
+                    },
+                    {
+                        'value': '1.2.3.7',
+                        'weight': 1
+                    }
+                ]
+            }
+        ])
+
+        provider._client.geofilters = Mock(return_value=[
+            {
+                'id': 1,
+                'name': 'World (Default)',
+                'geoipContinents': ['default']
+            },
+            {
+                'id': 5303,
+                'name': 'unit.tests.:www.dynamic:A:one',
+                'filterRulesLimit': 100,
+                'geoipContinents': ['AS', 'OC'],
+                'geoipCountries': ['ES', 'SE', 'UA'],
+                'regions': [{
+                    'continentCode': 'NA',
+                    'countryCode': 'CA',
+                    'regionCode': 'NL'
+                }]
+            },
+            {
+                'id': 9303,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'filterRulesLimit': 100,
+                'geoipContinents': ['default']
+            }
+        ])
+
+        # Domain exists, we don't care about return
+        resp_side_effect = [
+            [],  # get domain
+            [],  # delete A
+            [],  # delete geofilter
+            [],  # delete pool
+            [],  # delete A
+            [],  # delete geofilter
+            [],  # delete pool
+            [],  # delete A
+            {
+                'id': 1808522,
+                'name': 'unit.tests.:www.dynamic:A:one',
+                'type': 'A',
+                'values': [
+                    {
+                        'value': '1.2.3.6',
+                        'weight': 5
+                    },
+                    {
+                        'value': '1.2.3.7',
+                        'weight': 2
+                    }
+                ]
+            },  # update pool - no list
+            {
+                'id': 1808521,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'type': 'A',
+                'values': [
+                    {
+                        'value': '1.2.3.4',
+                        'weight': 1
+                    }
+                ]
+            },  # update pool - no list
+            [{
+                'id': 1808523,
+                'name': 'unit.tests.:www.dynamic:A:fallback',
+                'type': 'A',
+                'values': [
+                    {
+                        'value': '9.9.9.9',
+                        'weight': 1
+                    }
+                ]
+            }],  # create pool - list
+            {},
+            {},
+            {
+                'id': 123123,
+                'name': 'unit.tests',
+                'hasGeoIP': True
+            },  # domain listed for enabling geo
+            [],
+            [],
+            [],
+            []
+        ]
+        resp.json.side_effect = resp_side_effect
+
+        wanted = Zone('unit.tests.', [])
+        wanted.add_record(Record.new(wanted, 'www.dynamic', {
+            'ttl': 600,
+            'type': 'A',
+            'values': [
+                '1.2.3.4'
+            ],
+            'dynamic': {
+                'pools': {
+                    'one': {
+                        'fallback': 'two',
+                        'values': [{
+                            'value': '1.2.3.6',
+                            'weight': 5
+                        }, {
+                            'value': '1.2.3.7',
+                            'weight': 2
+                        }],
+                    },
+                    'two': {
+                        'fallback': 'fallback',
+                        'values': [{
+                            'value': '1.2.3.4',
+                            'weight': 1
+                        }],
+                    },
+                    'fallback': {  # fallback pool without rule
+                        'values': [{'value': '9.9.9.9'}]
+                    }
+                },
+                'rules': [{
+                    'geos': [
+                        'AS',
+                        'EU-DK',
+                        'EU-UA',
+                        'EU-SE',
+                        'NA-CA-NL',
+                        'OC'
+                    ],
+                    'pool': 'one'
+                }, {
+                    'pool': 'two',
+                }],
+            },
+        }))
+
+        plan = provider.plan(wanted)
+        self.assertEqual(1, len(plan.changes))
+        self.assertEqual(1, provider.apply(plan))
+
+        self.assertEqual(len(resp_side_effect),
+                         provider._client._request.call_count)
+
+        # recreate for update, and deletes for the 2 parts of the other
+        provider._client._request.assert_has_calls([
+            call('GET', '/domains/123123'),
+            call('DELETE', '/domains/123123/records/A/1808520'),
+            call('DELETE', '/geoFilters/9303'),
+            call('DELETE', '/pools/A/1808521'),
+            call('DELETE', '/domains/123123/records/A/1808521'),
+            call('DELETE', '/geoFilters/5303'),
+            call('DELETE', '/pools/A/1808522'),
+            call('DELETE', '/domains/123123/records/A/1808518'),
+            call('PUT', '/pools/A/1808522', data={
+                'name': 'unit.tests.:www.dynamic:A:one',
+                'type': 'A',
+                'numReturn': 1,
+                'minAvailableFailover': 1,
+                'values': [
+                    {'value': '1.2.3.6', 'weight': 5},
+                    {'value': '1.2.3.7', 'weight': 2}]
+            }),
             call('PUT', '/pools/A/1808521', data={
                 'name': 'unit.tests.:www.dynamic:A:two',
                 'type': 'A',
                 'numReturn': 1,
                 'minAvailableFailover': 1,
-                'ttl': 300,
-                'values': [{'value': '1.2.3.4', 'weight': 1}],
-                'id': 1808521,
-                'geofilter': 1
+                'values': [{'value': '1.2.3.4', 'weight': 1}]
             }),
-
+            call('POST', '/pools/A', data={
+                'name': 'unit.tests.:www.dynamic:A:fallback',
+                'type': 'A',
+                'numReturn': 1,
+                'minAvailableFailover': 1,
+                'values': [{'value': '9.9.9.9', 'weight': 1}]
+            }),
+            call('PUT', '/geoFilters/5303', data={
+                'filterRulesLimit': 100,
+                'name': 'unit.tests.:www.dynamic:A:one',
+                'geoipContinents': ['AS', 'OC'],
+                'geoipCountries': ['DK', 'SE', 'UA'],
+                'regions': [{
+                    'continentCode': 'NA',
+                    'countryCode': 'CA',
+                    'regionCode': 'NL'}]
+            }),
+            call('PUT', '/geoFilters/9303', data={
+                'filterRulesLimit': 100,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'geoipContinents': ['default']
+            }),
             call('GET', '/domains/123123'),
             call('POST', '/domains/123123/records/A', data={
                 'name': 'www.dynamic',
-                'ttl': 300,
+                'ttl': 600,
+                'roundRobin': [{
+                    'value': '1.2.3.4'
+                }],
+                'geolocation': {'geoipUserRegion': [1]}
+            }),
+            call('POST', '/domains/123123/records/A', data={
+                'name': 'www.dynamic',
+                'ttl': 600,
                 'pools': [1808522],
                 'recordOption': 'pools',
                 'geolocation': {
                     'geoipUserRegion': [5303]
                 }
             }),
-
             call('POST', '/domains/123123/records/A', data={
                 'name': 'www.dynamic',
-                'ttl': 300,
-                'pools': [1808522],
+                'ttl': 600,
+                'pools': [1808521],
                 'recordOption': 'pools',
                 'geolocation': {
-                    'geoipUserRegion': [5303]
+                    'geoipUserRegion': [9303]
                 }
             })
-        ], any_order=True)
+        ])
 
     def test_dynamic_record_failures(self):
         provider = ConstellixProvider('test', 'api', 'secret')
@@ -1506,27 +1476,39 @@ class TestConstellixProvider(TestCase):
         provider._client._request.reset_mock()
         provider._client.records = Mock(return_value=[
             {
-                "id": 1808520,
-                "type": "A",
-                "name": "www.dynamic",
-                "geolocation": None,
-                "recordOption": "pools",
-                "ttl": 300,
-                "value": [],
-                "pools": [
+                'id': 1808518,
+                'type': 'A',
+                'name': 'www.dynamic',
+                'geolocation': {
+                    'geoipFilter': 1
+                },
+                'ttl': 300,
+                'recordOption': 'roundRobin',
+                'value': [
+                    '1.2.3.4',
+                ]
+            }, {
+                'id': 1808520,
+                'type': 'A',
+                'name': 'www.dynamic',
+                'geolocation': None,
+                'recordOption': 'pools',
+                'ttl': 300,
+                'value': [],
+                'pools': [
                     1808521
                 ]
             }
         ])
 
         provider._client.pools = Mock(return_value=[{
-            "id": 1808521,
-            "name": "unit.tests.:www.dynamic:A:two",
-            "type": "A",
-            "values": [
+            'id': 1808521,
+            'name': 'unit.tests.:www.dynamic:A:two',
+            'type': 'A',
+            'values': [
                 {
-                    "value": "1.2.3.4",
-                    "weight": 1
+                    'value': '1.2.3.4',
+                    'weight': 1
                 }
             ]
         }])
@@ -1570,29 +1552,29 @@ class TestConstellixProvider(TestCase):
 
         provider._client.records = Mock(return_value=[
             {
-                "id": 1808520,
-                "type": "A",
-                "name": "www.dynamic",
-                "geolocation": {
-                    "geoipFilter": 1
+                'id': 1808520,
+                'type': 'A',
+                'name': 'www.dynamic',
+                'geolocation': {
+                    'geoipFilter': 1
                 },
-                "recordOption": "pools",
-                "ttl": 300,
-                "value": [],
-                "pools": [
+                'recordOption': 'pools',
+                'ttl': 300,
+                'value': [],
+                'pools': [
                     1808521
                 ]
             }, {
-                "id": 1808521,
-                "type": "A",
-                "name": "www.dynamic",
-                "geolocation": {
-                    "geoipFilter": 5303
+                'id': 1808521,
+                'type': 'A',
+                'name': 'www.dynamic',
+                'geolocation': {
+                    'geoipFilter': 5303
                 },
-                "recordOption": "pools",
-                "ttl": 300,
-                "value": [],
-                "pools": [
+                'recordOption': 'pools',
+                'ttl': 300,
+                'value': [],
+                'pools': [
                     1808522
                 ]
             }
@@ -1600,32 +1582,32 @@ class TestConstellixProvider(TestCase):
 
         provider._client.pools = Mock(return_value=[
             {
-                "id": 1808521,
-                "name": "unit.tests.:www.dynamic:A:two",
-                "type": "A",
-                "values": [
+                'id': 1808521,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'type': 'A',
+                'values': [
                     {
-                        "value": "1.2.3.4",
-                        "weight": 1
+                        'value': '1.2.3.4',
+                        'weight': 1
                     },
                     {
-                        "value": "1.2.3.5",
-                        "weight": 1
+                        'value': '1.2.3.5',
+                        'weight': 1
                     }
                 ]
             },
             {
-                "id": 1808522,
-                "name": "unit.tests.:www.dynamic:A:one",
-                "type": "A",
-                "values": [
+                'id': 1808522,
+                'name': 'unit.tests.:www.dynamic:A:one',
+                'type': 'A',
+                'values': [
                     {
-                        "value": "1.2.3.6",
-                        "weight": 1
+                        'value': '1.2.3.6',
+                        'weight': 1
                     },
                     {
-                        "value": "1.2.3.7",
-                        "weight": 1
+                        'value': '1.2.3.7',
+                        'weight': 1
                     }
                 ]
             }
@@ -1633,33 +1615,43 @@ class TestConstellixProvider(TestCase):
 
         provider._client.geofilters = Mock(return_value=[
             {
-                "id": 6303,
-                "name": "some.other",
-                "filterRulesLimit": 100,
-                "createdTs": "2021-08-19T14:47:47Z",
-                "modifiedTs": "2021-08-19T14:47:47Z",
-                "geoipContinents": ["AS", "OC"],
-                "geoipCountries": ["ES", "SE", "UA"],
-                "regions": [
+                'id': 1,
+                'name': 'World (Default)',
+                'geoipContinents': ['default']
+            }, {
+                'id': 6303,
+                'name': 'some.other',
+                'filterRulesLimit': 100,
+                'createdTs': '2021-08-19T14:47:47Z',
+                'modifiedTs': '2021-08-19T14:47:47Z',
+                'geoipContinents': ['AS', 'OC'],
+                'geoipCountries': ['ES', 'SE', 'UA'],
+                'regions': [
                     {
-                        "continentCode": "NA",
-                        "countryCode": "CA",
-                        "regionCode": "NL"
+                        'continentCode': 'NA',
+                        'countryCode': 'CA',
+                        'regionCode': 'NL'
                     }
                 ]
             }, {
-                "id": 5303,
-                "name": "unit.tests.:www.dynamic:A:one",
-                "filterRulesLimit": 100,
-                "geoipContinents": ["AS", "OC"],
-                "geoipCountries": ["ES", "SE", "UA"],
-                "regions": [
+                'id': 5303,
+                'name': 'unit.tests.:www.dynamic:A:one',
+                'filterRulesLimit': 100,
+                'geoipContinents': ['AS', 'OC'],
+                'geoipCountries': ['ES', 'SE', 'UA'],
+                'regions': [
                     {
-                        "continentCode": "NA",
-                        "countryCode": "CA",
-                        "regionCode": "NL"
+                        'continentCode': 'NA',
+                        'countryCode': 'CA',
+                        'regionCode': 'NL'
                     }
                 ]
+            },
+            {
+                'id': 9303,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'filterRulesLimit': 100,
+                'geoipContinents': ['default']
             }
         ])
 
@@ -1708,22 +1700,25 @@ class TestConstellixProvider(TestCase):
         # Try an error we can handle
         with requests_mock() as mock:
             mock.get(
-                "https://api.dns.constellix.com/v1/domains",
+                'https://api.dns.constellix.com/v1/domains',
                 status_code=200,
                 text='[{"id": 1234, "name": "unit.tests", "hasGeoIP": true}]')
             mock.get(
-                "https://api.dns.constellix.com/v1/domains/1234",
+                'https://api.dns.constellix.com/v1/domains/1234',
                 status_code=200,
                 text='{"id": 1234, "name": "unit.tests", "hasGeoIP": true}')
             mock.delete(ANY, status_code=200,
                         text='{}')
-            mock.put("https://api.dns.constellix.com/v1/pools/A/1808521",
+            mock.put('https://api.dns.constellix.com/v1/pools/A/1808521',
                      status_code=400,
                      text='{"errors": [\"no changes to save\"]}')
-            mock.put("https://api.dns.constellix.com/v1/pools/A/1808522",
+            mock.put('https://api.dns.constellix.com/v1/pools/A/1808522',
                      status_code=400,
                      text='{"errors": [\"no changes to save\"]}')
-            mock.put("https://api.dns.constellix.com/v1/geoFilters/5303",
+            mock.put('https://api.dns.constellix.com/v1/geoFilters/5303',
+                     status_code=400,
+                     text='{"errors": [\"no changes to save\"]}')
+            mock.put('https://api.dns.constellix.com/v1/geoFilters/9303',
                      status_code=400,
                      text='{"errors": [\"no changes to save\"]}')
             mock.post(ANY, status_code=200,
@@ -1735,16 +1730,27 @@ class TestConstellixProvider(TestCase):
 
             provider._client.geofilters = Mock(return_value=[
                 {
-                    "id": 5303,
-                    "name": "unit.tests.:www.dynamic:A:one",
-                    "filterRulesLimit": 100,
-                    "regions": [
+                    'id': 1,
+                    'name': 'World (Default)',
+                    'geoipContinents': ['default']
+                },
+                {
+                    'id': 5303,
+                    'name': 'unit.tests.:www.dynamic:A:one',
+                    'filterRulesLimit': 100,
+                    'regions': [
                         {
-                            "continentCode": "NA",
-                            "countryCode": "CA",
-                            "regionCode": "NL"
+                            'continentCode': 'NA',
+                            'countryCode': 'CA',
+                            'regionCode': 'NL'
                         }
                     ]
+                },
+                {
+                    'id': 9303,
+                    'name': 'unit.tests.:www.dynamic:A:two',
+                    'filterRulesLimit': 100,
+                    'geoipContinents': ['default']
                 }
             ])
 
@@ -1754,10 +1760,21 @@ class TestConstellixProvider(TestCase):
 
             provider._client.geofilters = Mock(return_value=[
                 {
-                    "id": 5303,
-                    "name": "unit.tests.:www.dynamic:A:one",
-                    "filterRulesLimit": 100,
-                    "geoipContinents": ["AS", "OC"],
+                    'id': 1,
+                    'name': 'World (Default)',
+                    'geoipContinents': ['default']
+                },
+                {
+                    'id': 5303,
+                    'name': 'unit.tests.:www.dynamic:A:one',
+                    'filterRulesLimit': 100,
+                    'geoipContinents': ['AS', 'OC'],
+                },
+                {
+                    'id': 9303,
+                    'name': 'unit.tests.:www.dynamic:A:two',
+                    'filterRulesLimit': 100,
+                    'geoipContinents': ['default']
                 }
             ])
 
@@ -1769,22 +1786,22 @@ class TestConstellixProvider(TestCase):
         # geofilter case
         with requests_mock() as mock:
             mock.get(
-                "https://api.dns.constellix.com/v1/domains",
+                'https://api.dns.constellix.com/v1/domains',
                 status_code=200,
                 text='[{"id": 1234, "name": "unit.tests", "hasGeoIP": true}]')
             mock.get(
-                "https://api.dns.constellix.com/v1/domains/1234",
+                'https://api.dns.constellix.com/v1/domains/1234',
                 status_code=200,
                 text='{"id": 1234, "name": "unit.tests", "hasGeoIP": true}')
             mock.delete(ANY, status_code=200,
                         text='{}')
-            mock.put("https://api.dns.constellix.com/v1/pools/A/1808521",
+            mock.put('https://api.dns.constellix.com/v1/pools/A/1808521',
                      status_code=400,
                      text='{"errors": [\"no changes to save\"]}')
-            mock.put("https://api.dns.constellix.com/v1/pools/A/1808522",
+            mock.put('https://api.dns.constellix.com/v1/pools/A/1808522',
                      status_code=400,
                      text='{"errors": [\"no changes to save\"]}')
-            mock.put("https://api.dns.constellix.com/v1/geoFilters/5303",
+            mock.put('https://api.dns.constellix.com/v1/geoFilters/5303',
                      status_code=400,
                      text='{"errors": [\"generic error\"]}')
             mock.post(ANY, status_code=200,
@@ -1798,22 +1815,22 @@ class TestConstellixProvider(TestCase):
         # Now what happens if an error happens that we can't handle
         with requests_mock() as mock:
             mock.get(
-                "https://api.dns.constellix.com/v1/domains",
+                'https://api.dns.constellix.com/v1/domains',
                 status_code=200,
                 text='[{"id": 1234, "name": "unit.tests", "hasGeoIP": true}]')
             mock.get(
-                "https://api.dns.constellix.com/v1/domains/1234",
+                'https://api.dns.constellix.com/v1/domains/1234',
                 status_code=200,
                 text='{"id": 1234, "name": "unit.tests", "hasGeoIP": true}')
             mock.delete(ANY, status_code=200,
                         text='{}')
-            mock.put("https://api.dns.constellix.com/v1/pools/A/1808521",
+            mock.put('https://api.dns.constellix.com/v1/pools/A/1808521',
                      status_code=400,
                      text='{"errors": [\"generic error\"]}')
-            mock.put("https://api.dns.constellix.com/v1/pools/A/1808522",
+            mock.put('https://api.dns.constellix.com/v1/pools/A/1808522',
                      status_code=400,
                      text='{"errors": [\"generic error\"]}')
-            mock.put("https://api.dns.constellix.com/v1/geoFilters/5303",
+            mock.put('https://api.dns.constellix.com/v1/geoFilters/5303',
                      status_code=400,
                      text='{"errors": [\"generic error\"]}')
             mock.post(ANY, status_code=200,
@@ -1828,13 +1845,13 @@ class TestConstellixProvider(TestCase):
         provider = ConstellixProvider('test', 'api', 'secret')
 
         provider._client.pools = Mock(return_value=[{
-            "id": 1808521,
-            "name": "unit.tests.:www.dynamic:A:two",
-            "type": "A",
-            "values": [
+            'id': 1808521,
+            'name': 'unit.tests.:www.dynamic:A:two',
+            'type': 'A',
+            'values': [
                 {
-                    "value": "1.2.3.4",
-                    "weight": 1
+                    'value': '1.2.3.4',
+                    'weight': 1
                 }
             ]
         }])
@@ -1846,13 +1863,13 @@ class TestConstellixProvider(TestCase):
         provider = ConstellixProvider('test', 'api', 'secret')
 
         provider._client.pools = Mock(return_value=[{
-            "id": 1808521,
-            "name": "unit.tests.:www.dynamic:A:two",
-            "type": "A",
-            "values": [
+            'id': 1808521,
+            'name': 'unit.tests.:www.dynamic:A:two',
+            'type': 'A',
+            'values': [
                 {
-                    "value": "1.2.3.4",
-                    "weight": 1
+                    'value': '1.2.3.4',
+                    'weight': 1
                 }
             ]
         }])
@@ -1865,23 +1882,23 @@ class TestConstellixProvider(TestCase):
         self.assertIsNone(not_found)
 
         provider._client.pools = Mock(return_value=[{
-            "id": 42,
-            "name": "unit.tests.:www.dynamic:A:two",
-            "type": "A",
-            "values": [
+            'id': 42,
+            'name': 'unit.tests.:www.dynamic:A:two',
+            'type': 'A',
+            'values': [
                 {
-                    "value": "1.2.3.4",
-                    "weight": 1
+                    'value': '1.2.3.4',
+                    'weight': 1
                 }
             ]
         }, {
-            "id": 451,
-            "name": "unit.tests.:www.dynamic:A:two",
-            "type": "AAAA",
-            "values": [
+            'id': 451,
+            'name': 'unit.tests.:www.dynamic:A:two',
+            'type': 'AAAA',
+            'values': [
                 {
-                    "value": "1.2.3.4",
-                    "weight": 1
+                    'value': '1.2.3.4',
+                    'weight': 1
                 }
             ]
         }])
@@ -1892,3 +1909,124 @@ class TestConstellixProvider(TestCase):
         aaaa_pool = provider._client.pool('AAAA',
                                           'unit.tests.:www.dynamic:A:two')
         self.assertEqual(451, aaaa_pool['id'])
+
+    def test_global_geofilter_untouched(self):
+        provider = ConstellixProvider('test', 'api', 'secret')
+
+        global_geofilter = {
+            'id': 1,
+            'name': 'World (Default)',
+            'geoipContinents': ['default']
+        }
+
+        resp = Mock()
+        resp.json = Mock()
+        provider._client._request = Mock(return_value=resp)
+
+        resp_side_effect = [
+            [{
+                'id': 1,
+                'name': 'World (Default)',
+                'geoipContinents': ['default']
+            }],  # geofilters returned
+            []
+        ]
+        resp.json.side_effect = resp_side_effect
+
+        result = provider._create_update_geofilter(
+            'World (Default)', ['EU'], [], [{
+                'continentCode': 'EU'
+            }]
+        )
+        self.assertEqual(global_geofilter, result)
+
+    def test_unsupported_geo_warn(self):
+        provider = ConstellixProvider('test', 'api', 'secret')
+        zone = Zone('unit.tests.', [])
+
+        with self.assertLogs() as captured:
+            with requests_mock() as mock:
+                base = 'https://api.dns.constellix.com/v1'
+                with open('tests/fixtures/constellix-domains.json') as fh:
+                    mock.get(f'{base}/domains', text=fh.read())
+                with open('tests/fixtures/constellix-records-geo.json') as fh:
+                    mock.get(f'{base}/domains/123123/records', text=fh.read())
+                with open('tests/fixtures/constellix-geofilters.json') as fh:
+                    mock.get(f'{base}/geoFilters', text=fh.read())
+                mock.get(f'{base}/pools/A', text='')
+                with open('tests/fixtures/constellix-geofilters.json') as fh:
+                    mock.get(f'{base}/geoFilters', text=fh.read())
+
+                provider.populate(zone)
+            self.assertEqual(len(captured.records), 3)
+            self.assertEqual(captured.records[0].getMessage(),
+                             "unsupported geofilter 5303 on non-pool record; "
+                             "will ignore the geo filter")
+            self.assertEqual(captured.records[1].getMessage(),
+                             "unsupported geo configuration; "
+                             "will use global default only")
+            self.assertEqual(captured.records[2].getMessage(),
+                             "populate:   found 1 records, exists=True")
+
+    def test_unsupported_geo_strict(self):
+        provider = ConstellixProvider('test', 'api', 'secret')
+        zone = Zone('unit.tests.', [])
+
+        provider.strict_supports = True
+
+        with self.assertRaises(SupportsException) as context:
+            with requests_mock() as mock:
+                base = 'https://api.dns.constellix.com/v1'
+                with open('tests/fixtures/constellix-domains.json') as fh:
+                    mock.get(f'{base}/domains', text=fh.read())
+                with open('tests/fixtures/constellix-records-geo.json') as fh:
+                    mock.get(f'{base}/domains/123123/records', text=fh.read())
+                with open('tests/fixtures/constellix-geofilters.json') as fh:
+                    mock.get(f'{base}/geoFilters', text=fh.read())
+                mock.get(f'{base}/pools/A', text='')
+                with open('tests/fixtures/constellix-geofilters.json') as fh:
+                    mock.get(f'{base}/geoFilters', text=fh.read())
+
+                provider.populate(zone)
+        self.assertEqual(str(context.exception), "test: "
+                         "unsupported geofilter 5303 on non-pool record")
+
+    def test_unsupported_multi_warn(self):
+        provider = ConstellixProvider('test', 'api', 'secret')
+        zone = Zone('unit.tests.', [])
+
+        with self.assertLogs() as captured:
+            with requests_mock() as mock:
+                base = 'https://api.dns.constellix.com/v1'
+                with open('tests/fixtures/constellix-domains.json') as fh:
+                    mock.get(f'{base}/domains', text=fh.read())
+                with open(
+                    'tests/fixtures/constellix-records-multi-gtd.json'
+                ) as fh:
+                    mock.get(f'{base}/domains/123123/records', text=fh.read())
+                mock.get(f'{base}/pools/A', text='')
+                mock.get(f'{base}/geoFilters', text='')
+
+                provider.populate(zone)
+            self.assertEqual(len(captured.records), 2)
+            self.assertEqual(captured.records[0].getMessage(),
+                             "unsupported multiple entries; "
+                             "will use first value ['2.2.3.4', '2.2.3.5']")
+            self.assertEqual(captured.records[1].getMessage(),
+                             "populate:   found 1 records, exists=True")
+
+
+class TestConstellixClient(TestCase):
+    def test_unknown_geofilter(self):
+        log = logging.getLogger('client')
+        client = ConstellixClient(log, 'test', 'api', 'secret')
+
+        resp = Mock()
+        resp.json = Mock()
+        client._request = Mock(return_value=resp)
+        resp_side_effect = [
+            [],  # GET /geoFilters
+        ]
+        resp.json.side_effect = resp_side_effect
+
+        self.assertIsNone(client.geofilter_by_id(9999999))
