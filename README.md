@@ -57,6 +57,8 @@ ConstellixProvider supports dynamic records.
 
 #### Health Check Options
 
+See https://github.com/octodns/octodns/blob/master/docs/dynamic_records.md#health-checks for information on health checking for dynamic records. ConstellixProvider supports the following options:
+
 | Key  | Description | Default |
 |--|--|--|
 | sonar_interval | Sonar check interval | ONEMINUTE |
