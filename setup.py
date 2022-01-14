@@ -31,8 +31,7 @@ setup(
     url='https://github.com/octodns/octodns-constellix',
     version=version(),
     tests_require=(
-        'nose',
-        'nose-no-network',
-        'rquests_mock'
+        'pytest',
+        'pytest-network',
     ),
 )
