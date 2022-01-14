@@ -17,7 +17,7 @@ from octodns_constellix import ConstellixProvider, ConstellixClientBadRequest
 
 class TestConstellixProvider(TestCase):
     expected = Zone('unit.tests.', [])
-    source = YamlProvider('test', join(dirname(__file__), 'tests', 'config'))
+    source = YamlProvider('test', join(dirname(__file__), 'config'))
     source.populate(expected)
 
     # Our test suite differs a bit, add our NS and remove the simple one
@@ -69,7 +69,7 @@ class TestConstellixProvider(TestCase):
             break
 
     expected_healthcheck = Zone('unit.tests.', [])
-    source = YamlProvider('test', join(dirname(__file__), 'tests', 'config'))
+    source = YamlProvider('test', join(dirname(__file__), 'config'))
     source.populate(expected_healthcheck)
 
     # Our test suite differs a bit, add our NS and remove the simple one
@@ -135,7 +135,7 @@ class TestConstellixProvider(TestCase):
             break
 
     expected_healthcheck_world = Zone('unit.tests.', [])
-    source = YamlProvider('test', join(dirname(__file__), 'tests', 'config'))
+    source = YamlProvider('test', join(dirname(__file__), 'config'))
     source.populate(expected_healthcheck_world)
 
     # Our test suite differs a bit, add our NS and remove the simple one
@@ -204,7 +204,7 @@ class TestConstellixProvider(TestCase):
             break
 
     expected_dynamic = Zone('unit.tests.', [])
-    source = YamlProvider('test', join(dirname(__file__), 'tests', 'config'))
+    source = YamlProvider('test', join(dirname(__file__), 'config'))
     source.populate(expected_dynamic)
 
     # Our test suite differs a bit, add our NS and remove the simple one
