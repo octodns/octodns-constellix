@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import find_packages, setup
 
 
 def descriptions():
@@ -25,9 +25,12 @@ setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     name='octodns-constellix',
-    packages=('octodns_constellix',),
+    packages=find_packages(),
     python_requires='>=3.6',
-    install_requires=('octodns>=0.9.14', 'requests>=2.27.0'),
+    install_requires=(
+        'octodns>=0.9.14',
+        'requests>=2.27.0',
+    ),
     url='https://github.com/octodns/octodns-constellix',
     version=version(),
     tests_require=(
