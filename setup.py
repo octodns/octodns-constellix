@@ -20,6 +20,7 @@ description, long_description = descriptions()
 tests_require = (
     'pytest',
     'pytest-network',
+    'requests_mock',
 )
 
 setup(
