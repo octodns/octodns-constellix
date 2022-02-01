@@ -29,6 +29,7 @@ setup(
     python_requires='>=3.6',
     install_requires=(
         'octodns>=0.9.14',
+        'pycountry-convert>=0.7.2',
         'requests>=2.27.0',
     ),
     url='https://github.com/octodns/octodns-constellix',
