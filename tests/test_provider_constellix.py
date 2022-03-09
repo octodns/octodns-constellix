@@ -66,7 +66,8 @@ class TestConstellixProvider(TestCase):
     for record in list(expected.records):
         if record.name == 'sub' and record._type == 'NS':
             expected._remove_record(record)
-            break
+        if record.name == '' and record._type == 'NS':
+            expected._remove_record(record)
 
     expected_healthcheck = Zone('unit.tests.', [])
     source = YamlProvider('test', join(dirname(__file__), 'config'))
@@ -273,7 +274,8 @@ class TestConstellixProvider(TestCase):
     for record in list(expected_dynamic.records):
         if record.name == 'sub' and record._type == 'NS':
             expected_dynamic._remove_record(record)
-            break
+        if record.name == '' and record._type == 'NS':
+            expected_dynamic._remove_record(record)
 
     def test_populate(self):
         provider = ConstellixProvider('test', 'api', 'secret')
@@ -409,8 +411,8 @@ class TestConstellixProvider(TestCase):
 
         plan = provider.plan(self.expected)
 
-        # No root NS, no ignored, no excluded, no unsupported
-        n = len(self.expected.records) - 8
+        # No ignored, no excluded, no unsupported
+        n = len(self.expected.records) - 7
         self.assertEqual(n, len(plan.changes))
         self.assertEqual(n, provider.apply(plan))
 
@@ -1164,8 +1166,8 @@ class TestConstellixProvider(TestCase):
 
         plan = provider.plan(self.expected_dynamic)
 
-        # No root NS, no ignored, no excluded, no unsupported
-        n = len(self.expected_dynamic.records) - 8
+        # No ignored, no excluded, no unsupported
+        n = len(self.expected_dynamic.records) - 7
         self.assertEqual(n, len(plan.changes))
         self.assertEqual(n, provider.apply(plan))
 
