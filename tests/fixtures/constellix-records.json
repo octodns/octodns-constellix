@@ -65,7 +65,7 @@
 	"pools": [],
 	"poolsDetail": []
 }, {
-	"id": 1808527,
+	"id": 1808526,
 	"type": "SRV",
 	"recordType": "srv",
 	"name": "_srv._tcp",
@@ -133,7 +133,7 @@
 		"disableFlag": false
 	}]
 }, {
-	"id": 1808527,
+	"id": 1808528,
 	"type": "SRV",
 	"recordType": "srv",
 	"name": "_pop3._tcp",
@@ -580,7 +580,7 @@
 	"pools": [],
 	"poolsDetail": []
 }, {
-	"id": 1808520,
+	"id": 1808510,
 	"type": "A",
 	"recordType": "a",
 	"name": "www.sub",
@@ -615,6 +615,46 @@
 	"pools": [],
 	"poolsDetail": []
 }, {
+	"id": 1808518,
+	"type": "A",
+	"recordType": "a",
+	"name": "www.dynamic",
+	"recordOption": "roundRobin",
+	"noAnswer": false,
+	"note": "",
+	"ttl": 300,
+	"gtdRegion": 1,
+	"parentId": 123123,
+	"parent": "domain",
+	"source": "Domain",
+	"modifiedTs": 1565150090588,
+	"value": ["2.2.3.4","2.2.3.5"],
+	"roundRobin": [{
+		"value": "2.2.3.4",
+		"disableFlag": false
+	}, {
+		"value": "2.2.3.5",
+		"disableFlag": false
+	}],
+	"geolocation": {
+		"geoipFilter": 1
+	},
+	"recordFailover": {
+		"disabled": false,
+		"failoverType": 1,
+		"failoverTypeStr": "Normal (always lowest level)",
+		"values": []
+	},
+	"failover": {
+		"disabled": false,
+		"failoverType": 1,
+		"failoverTypeStr": "Normal (always lowest level)",
+		"values": []
+	},
+	"roundRobinFailover": [],
+	"pools": [],
+	"poolsDetail": []
+}, {
 	"id": 1808520,
 	"type": "A",
 	"recordType": "a",
@@ -631,7 +671,7 @@
 	"value": [],
 	"roundRobin": [],
 	"geolocation": {
-		"geoipFilter": 1
+		"geoipFilter": 9303
 	},
 	"recordFailover": {
 		"disabled": false,
