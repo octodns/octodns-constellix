@@ -23,20 +23,17 @@ class ConstellixClientException(ProviderException):
 
 
 class ConstellixClientBadRequest(ConstellixClientException):
-
     def __init__(self, resp):
         errors = '\n  - '.join(resp.json()['errors'])
         super(ConstellixClientBadRequest, self).__init__(f'\n  - {errors}')
 
 
 class ConstellixClientUnauthorized(ConstellixClientException):
-
     def __init__(self):
         super(ConstellixClientUnauthorized, self).__init__('Unauthorized')
 
 
 class ConstellixClientNotFound(ConstellixClientException):
-
     def __init__(self):
         super(ConstellixClientNotFound, self).__init__('Not Found')
 
@@ -58,8 +55,11 @@ class ConstellixClient(object):
         return str(int(time.time() * 1000))
 
     def _hmac_hash(self, now):
-        return hmac.new(self.secret_key.encode('utf-8'), now.encode('utf-8'),
-                        digestmod=hashlib.sha1).digest()
+        return hmac.new(
+            self.secret_key.encode('utf-8'),
+            now.encode('utf-8'),
+            digestmod=hashlib.sha1,
+        ).digest()
 
     def _request(self, method, path, params=None, data=None):
         now = self._current_time()
@@ -67,12 +67,13 @@ class ConstellixClient(object):
 
         headers = {
             'x-cnsdns-hmac': b64encode(hmac_hash),
-            'x-cnsdns-requestDate': now
+            'x-cnsdns-requestDate': now,
         }
 
         url = f'{self.BASE}{path}'
-        resp = self._sess.request(method, url, headers=headers,
-                                  params=params, json=data)
+        resp = self._sess.request(
+            method, url, headers=headers, params=params, json=data
+        )
         if resp.status_code == 400:
             raise ConstellixClientBadRequest(resp)
         if resp.status_code == 401:
@@ -112,9 +113,7 @@ class ConstellixClient(object):
         if domain['hasGeoIP'] is False:
             domain_id = self.domains[domain_name]
             self._request(
-                'PUT',
-                f'/domains/{domain_id}',
-                data={'hasGeoIP': True}
+                'PUT', f'/domains/{domain_id}', data={'hasGeoIP': True}
             )
 
     def _absolutize_value(self, value, zone_name):
@@ -141,12 +140,12 @@ class ConstellixClient(object):
             value = record['value']
             if record['type'] in ['ALIAS', 'CNAME', 'MX', 'NS', 'SRV']:
                 if isinstance(value, str):
-                    record['value'] = self._absolutize_value(value,
-                                                             zone_name)
+                    record['value'] = self._absolutize_value(value, zone_name)
                 if isinstance(value, list):
                     for v in value:
-                        v['value'] = self._absolutize_value(v['value'],
-                                                            zone_name)
+                        v['value'] = self._absolutize_value(
+                            v['value'], zone_name
+                        )
 
         return resp
 
@@ -276,20 +275,17 @@ class SonarClientException(ProviderException):
 
 
 class SonarClientBadRequest(SonarClientException):
-
     def __init__(self, resp):
         errors = resp.text
         super(SonarClientBadRequest, self).__init__(f'\n  - {errors}')
 
 
 class SonarClientUnauthorized(SonarClientException):
-
     def __init__(self):
         super(SonarClientUnauthorized, self).__init__('Unauthorized')
 
 
 class SonarClientNotFound(SonarClientException):
-
     def __init__(self):
         super(SonarClientNotFound, self).__init__('Not Found')
 
@@ -315,9 +311,8 @@ class SonarClient(object):
 
     def _hmac_hash(self, now):
         digester = hmac.new(
-            bytes(self.secret_key, "UTF-8"),
-            bytes(now, "UTF-8"),
-            hashlib.sha1)
+            bytes(self.secret_key, "UTF-8"), bytes(now, "UTF-8"), hashlib.sha1
+        )
         signature = digester.digest()
         hmac_text = str(standard_b64encode(signature), "UTF-8")
         return hmac_text
@@ -328,14 +323,14 @@ class SonarClient(object):
 
         headers = {
             'x-cns-security-token': "{}:{}:{}".format(
-                self.api_key,
-                hmac_text,
-                now)
+                self.api_key, hmac_text, now
+            )
         }
 
         url = f'{self.BASE}{path}'
-        resp = self._sess.request(method, url, headers=headers,
-                                  params=params, json=data)
+        resp = self._sess.request(
+            method, url, headers=headers, params=params, json=data
+        )
         if resp.status_code == 400:
             raise SonarClientBadRequest(resp)
         if resp.status_code == 401:
@@ -379,7 +374,7 @@ class SonarClient(object):
 
     def parse_uri_id(self, url):
         r = str(url).rfind("/")
-        res = str(url)[r + 1:]
+        res = str(url)[r + 1 :]
         return res
 
     def checks(self, check_type):
@@ -428,11 +423,25 @@ class ConstellixProvider(BaseProvider):
     SUPPORTS_GEO = False
     SUPPORTS_DYNAMIC = True
     SUPPORTS_ROOT_NS = False
-    SUPPORTS = set(('A', 'AAAA', 'ALIAS', 'CAA', 'CNAME', 'MX',
-                    'NS', 'PTR', 'SPF', 'SRV', 'TXT'))
+    SUPPORTS = set(
+        (
+            'A',
+            'AAAA',
+            'ALIAS',
+            'CAA',
+            'CNAME',
+            'MX',
+            'NS',
+            'PTR',
+            'SPF',
+            'SRV',
+            'TXT',
+        )
+    )
 
-    def __init__(self, id, api_key, secret_key, ratelimit_delay=0.0,
-                 *args, **kwargs):
+    def __init__(
+        self, id, api_key, secret_key, ratelimit_delay=0.0, *args, **kwargs
+    ):
         self.log = logging.getLogger(f'ConstellixProvider[{id}]')
         self.log.debug('__init__: id=%s, api_key=***, secret_key=***', id)
         super(ConstellixProvider, self).__init__(id, *args, **kwargs)
@@ -446,11 +455,7 @@ class ConstellixProvider(BaseProvider):
         record = records[0]
         if record['recordOption'] == 'pools':
             return self._data_for_pool(_type, records)
-        return {
-            'ttl': record['ttl'],
-            'type': _type,
-            'values': record['value']
-        }
+        return {'ttl': record['ttl'], 'type': _type, 'values': record['value']}
 
     def _data_for_pool(self, _type, records):
         default_values = []
@@ -464,8 +469,10 @@ class ConstellixProvider(BaseProvider):
             pool = self._client.pool_by_id(_type, pool_id)
 
             geofilter_id = 1
-            if 'geolocation' in record.keys() \
-                    and record['geolocation'] is not None:
+            if (
+                'geolocation' in record.keys()
+                and record['geolocation'] is not None
+            ):
                 # fetch record geofilter data
                 geofilter_id = record['geolocation']['geoipFilter']
                 geofilter = self._client.geofilter_by_id(geofilter_id)
@@ -479,15 +486,11 @@ class ConstellixProvider(BaseProvider):
                     default_values.append(value['value'])
 
             # populate pools
-            pools[pool_name] = {
-                'fallback': None,
-                'values': []
-            }
+            pools[pool_name] = {'fallback': None, 'values': []}
             for value in pool['values']:
-                pools[pool_name]['values'].append({
-                    'value': value['value'],
-                    'weight': value['weight']
-                })
+                pools[pool_name]['values'].append(
+                    {'value': value['value'], 'weight': value['weight']}
+                )
 
             # populate rules
             if geofilter_id == 1:
@@ -501,20 +504,20 @@ class ConstellixProvider(BaseProvider):
 
                 if 'geoipCountries' in geofilter.keys():
                     for country_code in geofilter['geoipCountries']:
-                        continent_code = \
-                            country_alpha2_to_continent_code(country_code)
+                        continent_code = country_alpha2_to_continent_code(
+                            country_code
+                        )
                         geos.append(f'{continent_code}-{country_code}')
 
                 if 'regions' in geofilter.keys():
                     for region in geofilter['regions']:
-                        geos.append(f'{region["continentCode"]}-'
-                                    f'{region["countryCode"]}-'
-                                    f'{region["regionCode"]}')
+                        geos.append(
+                            f'{region["continentCode"]}-'
+                            f'{region["countryCode"]}-'
+                            f'{region["regionCode"]}'
+                        )
 
-                rules.append({
-                    'pool': pool_name,
-                    'geos': sorted(geos)
-                })
+                rules.append({'pool': pool_name, 'geos': sorted(geos)})
 
         # set fallback pool
         for pool_name in pools:
@@ -525,11 +528,10 @@ class ConstellixProvider(BaseProvider):
             'ttl': record['ttl'],
             'type': _type,
             'dynamic': {
-                'pools': dict(
-                    sorted(pools.items(), key=lambda t: t[0])),
-                'rules': sorted(rules, key=lambda t: t['pool'])
+                'pools': dict(sorted(pools.items(), key=lambda t: t[0])),
+                'rules': sorted(rules, key=lambda t: t['pool']),
             },
-            'values': default_values
+            'values': default_values,
         }
         return res
 
@@ -540,23 +542,21 @@ class ConstellixProvider(BaseProvider):
         values = []
         record = records[0]
         for value in record['value']:
-            values.append({
-                'flags': value['flag'],
-                'tag': value['tag'],
-                'value': value['data']
-            })
-        return {
-            'ttl': records[0]['ttl'],
-            'type': _type,
-            'values': values
-        }
+            values.append(
+                {
+                    'flags': value['flag'],
+                    'tag': value['tag'],
+                    'value': value['data'],
+                }
+            )
+        return {'ttl': records[0]['ttl'], 'type': _type, 'values': values}
 
     def _data_for_NS(self, _type, records):
         record = records[0]
         return {
             'ttl': record['ttl'],
             'type': _type,
-            'values': [value['value'] for value in record['value']]
+            'values': [value['value'] for value in record['value']],
         }
 
     def _data_for_ALIAS(self, _type, records):
@@ -564,19 +564,16 @@ class ConstellixProvider(BaseProvider):
         return {
             'ttl': record['ttl'],
             'type': _type,
-            'value': record['value'][0]['value']
+            'value': record['value'][0]['value'],
         }
 
     _data_for_PTR = _data_for_ALIAS
 
     def _data_for_TXT(self, _type, records):
-        values = [value['value'].replace(';', '\\;')
-                  for value in records[0]['value']]
-        return {
-            'ttl': records[0]['ttl'],
-            'type': _type,
-            'values': values
-        }
+        values = [
+            value['value'].replace(';', '\\;') for value in records[0]['value']
+        ]
+        return {'ttl': records[0]['ttl'], 'type': _type, 'values': values}
 
     _data_for_SPF = _data_for_TXT
 
@@ -584,23 +581,14 @@ class ConstellixProvider(BaseProvider):
         values = []
         record = records[0]
         for value in record['value']:
-            values.append({
-                'preference': value['level'],
-                'exchange': value['value']
-            })
-        return {
-            'ttl': records[0]['ttl'],
-            'type': _type,
-            'values': values
-        }
+            values.append(
+                {'preference': value['level'], 'exchange': value['value']}
+            )
+        return {'ttl': records[0]['ttl'], 'type': _type, 'values': values}
 
     def _data_for_single(self, _type, records):
         record = records[0]
-        return {
-            'ttl': record['ttl'],
-            'type': _type,
-            'value': record['value']
-        }
+        return {'ttl': record['ttl'], 'type': _type, 'value': record['value']}
 
     _data_for_CNAME = _data_for_single
 
@@ -608,38 +596,40 @@ class ConstellixProvider(BaseProvider):
         values = []
         record = records[0]
         for value in record['value']:
-            values.append({
-                'port': value['port'],
-                'priority': value['priority'],
-                'target': value['value'],
-                'weight': value['weight']
-            })
-        return {
-            'type': _type,
-            'ttl': records[0]['ttl'],
-            'values': values
-        }
+            values.append(
+                {
+                    'port': value['port'],
+                    'priority': value['priority'],
+                    'target': value['value'],
+                    'weight': value['weight'],
+                }
+            )
+        return {'type': _type, 'ttl': records[0]['ttl'], 'values': values}
 
     def zone_records(self, zone):
         if zone.name not in self._zone_records:
             try:
-                self._zone_records[zone.name] = \
-                    self._client.records(zone.name)
+                self._zone_records[zone.name] = self._client.records(zone.name)
             except ConstellixClientNotFound:
                 return []
 
         return self._zone_records[zone.name]
 
     def populate(self, zone, target=False, lenient=False):
-        self.log.debug('populate: name=%s, target=%s, lenient=%s', zone.name,
-                       target, lenient)
+        self.log.debug(
+            'populate: name=%s, target=%s, lenient=%s',
+            zone.name,
+            target,
+            lenient,
+        )
 
         values = defaultdict(lambda: defaultdict(list))
         for record in self.zone_records(zone):
             _type = record['type']
             if _type not in self.SUPPORTS:
-                self.log.warning('populate: skipping unsupported %s record',
-                                 _type)
+                self.log.warning(
+                    'populate: skipping unsupported %s record', _type
+                )
                 continue
             values[record['name']][record['type']].append(record)
 
@@ -647,18 +637,27 @@ class ConstellixProvider(BaseProvider):
         for name, types in values.items():
             for _type, records in types.items():
                 data_for = getattr(self, f'_data_for_{_type}')
-                record = Record.new(zone, name, data_for(_type, records),
-                                    source=self, lenient=lenient)
+                record = Record.new(
+                    zone,
+                    name,
+                    data_for(_type, records),
+                    source=self,
+                    lenient=lenient,
+                )
                 zone.add_record(record, lenient=lenient)
 
         exists = zone.name in self._zone_records
-        self.log.info('populate:   found %s records, exists=%s',
-                      len(zone.records) - before, exists)
+        self.log.info(
+            'populate:   found %s records, exists=%s',
+            len(zone.records) - before,
+            exists,
+        )
         return exists
 
     def _healthcheck_config(self, record):
-        sonar_healthcheck = record._octodns.get('constellix', {}) \
-            .get('healthcheck', None)
+        sonar_healthcheck = record._octodns.get('constellix', {}).get(
+            'healthcheck', None
+        )
 
         if sonar_healthcheck is None:
             return None
@@ -667,12 +666,10 @@ class ConstellixProvider(BaseProvider):
         healthcheck["sonar_port"] = sonar_healthcheck.get('sonar_port', 80)
         healthcheck["sonar_type"] = sonar_healthcheck.get('sonar_type', "TCP")
         healthcheck["sonar_regions"] = sonar_healthcheck.get(
-            'sonar_regions',
-            ["WORLD"]
+            'sonar_regions', ["WORLD"]
         )
         healthcheck["sonar_interval"] = sonar_healthcheck.get(
-            'sonar_interval',
-            "ONEMINUTE"
+            'sonar_interval', "ONEMINUTE"
         )
 
         return healthcheck
@@ -681,9 +678,7 @@ class ConstellixProvider(BaseProvider):
         yield {
             'name': record.name,
             'ttl': record.ttl,
-            'roundRobin': [{
-                'value': value
-            } for value in record.values]
+            'roundRobin': [{'value': value} for value in record.values],
         }
 
     _params_for_A = _params_for_multiple
@@ -695,11 +690,7 @@ class ConstellixProvider(BaseProvider):
     _params_for_NS = _params_for_multiple
 
     def _params_for_single(self, record):
-        yield {
-            'name': record.name,
-            'ttl': record.ttl,
-            'host': record.value,
-        }
+        yield {'name': record.name, 'ttl': record.ttl, 'host': record.value}
 
     _params_for_CNAME = _params_for_single
 
@@ -707,10 +698,7 @@ class ConstellixProvider(BaseProvider):
         yield {
             'name': record.name,
             'ttl': record.ttl,
-            'roundRobin': [{
-                'value': record.value,
-                'disableFlag': False
-            }]
+            'roundRobin': [{'value': record.value, 'disableFlag': False}],
         }
 
     _params_for_PTR = _params_for_ALIAS
@@ -718,61 +706,44 @@ class ConstellixProvider(BaseProvider):
     def _params_for_MX(self, record):
         values = []
         for value in record.values:
-            values.append({
-                'value': value.exchange,
-                'level': value.preference
-            })
+            values.append({'value': value.exchange, 'level': value.preference})
         yield {
             'value': value.exchange,
             'name': record.name,
             'ttl': record.ttl,
-            'roundRobin': values
+            'roundRobin': values,
         }
 
     def _params_for_SRV(self, record):
         values = []
         for value in record.values:
-            values.append({
-                'value': value.target,
-                'priority': value.priority,
-                'weight': value.weight,
-                'port': value.port
-            })
+            values.append(
+                {
+                    'value': value.target,
+                    'priority': value.priority,
+                    'weight': value.weight,
+                    'port': value.port,
+                }
+            )
         for value in record.values:
-            yield {
-                'name': record.name,
-                'ttl': record.ttl,
-                'roundRobin': values
-            }
+            yield {'name': record.name, 'ttl': record.ttl, 'roundRobin': values}
 
     def _params_for_TXT(self, record):
         # Constellix does not want values escaped
         values = []
         for value in record.chunked_values:
-            values.append({
-                'value': value.replace('\\;', ';')
-            })
-        yield {
-            'name': record.name,
-            'ttl': record.ttl,
-            'roundRobin': values
-        }
+            values.append({'value': value.replace('\\;', ';')})
+        yield {'name': record.name, 'ttl': record.ttl, 'roundRobin': values}
 
     _params_for_SPF = _params_for_TXT
 
     def _params_for_CAA(self, record):
         values = []
         for value in record.values:
-            values.append({
-                'tag': value.tag,
-                'data': value.value,
-                'flag': value.flags,
-            })
-        yield {
-            'name': record.name,
-            'ttl': record.ttl,
-            'roundRobin': values
-        }
+            values.append(
+                {'tag': value.tag, 'data': value.value, 'flag': value.flags}
+            )
+        yield {'name': record.name, 'ttl': record.ttl, 'roundRobin': values}
 
     def _handle_pools(self, record):
         healthcheck = self._healthcheck_config(record)
@@ -787,32 +758,31 @@ class ConstellixProvider(BaseProvider):
             pool_name = rule.data.get('pool')
             pool = record.dynamic.pools.get(pool_name)
             values = [
-                {
-                    'value': value['value'],
-                    'weight': value['weight'],
-                } for value in pool.data.get('values', [])
+                {'value': value['value'], 'weight': value['weight']}
+                for value in pool.data.get('values', [])
             ]
 
             # Make a pool name based on zone, record, type and name
-            generated_pool_name = \
+            generated_pool_name = (
                 f'{record.zone.name}:{record.name}:{record._type}:{pool_name}'
+            )
 
             # Create Sonar checks if needed
             if healthcheck is not None:
-                check_sites = self._sonar.\
-                    agents_for_regions(healthcheck["sonar_regions"])
+                check_sites = self._sonar.agents_for_regions(
+                    healthcheck["sonar_regions"]
+                )
                 for value in values:
                     check_obj = self._create_update_check(
-                        pool_type = record._type,
-                        check_name = '{}-{}'.format(
-                            generated_pool_name,
-                            value['value']
+                        pool_type=record._type,
+                        check_name='{}-{}'.format(
+                            generated_pool_name, value['value']
                         ),
-                        check_type = healthcheck["sonar_type"].lower(),
-                        value = value['value'],
-                        port = healthcheck["sonar_port"],
-                        interval = healthcheck["sonar_interval"],
-                        sites = check_sites
+                        check_type=healthcheck["sonar_type"].lower(),
+                        value=value['value'],
+                        port=healthcheck["sonar_port"],
+                        interval=healthcheck["sonar_interval"],
+                        sites=check_sites,
                     )
                     value['checkId'] = check_obj['id']
                     value['policy'] = "followsonar"
@@ -820,10 +790,10 @@ class ConstellixProvider(BaseProvider):
             # OK, pool is valid, let's create it or update it
             self.log.debug("Creating pool %s", generated_pool_name)
             pool_obj = self._create_update_pool(
-                pool_name = generated_pool_name,
-                pool_type = record._type,
-                ttl = record.ttl,
-                values = values
+                pool_name=generated_pool_name,
+                pool_type=record._type,
+                ttl=record.ttl,
+                values=values,
             )
 
             # Now will crate GeoFilter for the pool
@@ -839,26 +809,24 @@ class ConstellixProvider(BaseProvider):
                 elif n == 5:
                     countries.append(codes[1])
                 else:
-                    regions.append({
-                        'continentCode': codes[0],
-                        'countryCode': codes[1],
-                        'regionCode': codes[2]
-                    })
+                    regions.append(
+                        {
+                            'continentCode': codes[0],
+                            'countryCode': codes[1],
+                            'regionCode': codes[2],
+                        }
+                    )
 
-            if len(continents) == 0 and \
-                len(countries) == 0 and \
-                    len(regions) == 0:
+            if (
+                len(continents) == 0
+                and len(countries) == 0
+                and len(regions) == 0
+            ):
                 pool_obj['geofilter'] = 1
             else:
-                self.log.debug(
-                    "Creating geofilter %s",
-                    generated_pool_name
-                )
+                self.log.debug("Creating geofilter %s", generated_pool_name)
                 geofilter_obj = self._create_update_geofilter(
-                    generated_pool_name,
-                    continents,
-                    countries,
-                    regions
+                    generated_pool_name, continents, countries, regions
                 )
                 pool_obj['geofilter'] = geofilter_obj['id']
 
@@ -866,21 +834,15 @@ class ConstellixProvider(BaseProvider):
         return res_pools
 
     def _create_update_check(
-            self,
-            pool_type,
-            check_name,
-            check_type,
-            value,
-            port,
-            interval,
-            sites):
+        self, pool_type, check_name, check_type, value, port, interval, sites
+    ):
 
         check = {
             'name': check_name,
             'host': value,
             'port': port,
             'checkSites': sites,
-            'interval': interval
+            'interval': interval,
         }
         if pool_type == "AAAA":
             check['ipVersion'] = "IPV6"
@@ -903,7 +865,7 @@ class ConstellixProvider(BaseProvider):
             'numReturn': 1,
             'minAvailableFailover': 1,
             'ttl': ttl,
-            'values': values
+            'values': values,
         }
         existing_pool = self._client.pool(pool_type, pool_name)
         if not existing_pool:
@@ -915,17 +877,14 @@ class ConstellixProvider(BaseProvider):
         return updated_pool
 
     def _create_update_geofilter(
-            self,
-            geofilter_name,
-            continents,
-            countries,
-            regions):
+        self, geofilter_name, continents, countries, regions
+    ):
         geofilter = {
             'filterRulesLimit': 100,
             'name': geofilter_name,
             'geoipContinents': continents,
             'geoipCountries': countries,
-            'regions': regions
+            'regions': regions,
         }
         if len(regions) == 0:
             geofilter.pop('regions', None)
@@ -936,7 +895,8 @@ class ConstellixProvider(BaseProvider):
 
         geofilter_id = existing_geofilter['id']
         updated_geofilter = self._client.geofilter_update(
-            geofilter_id, geofilter)
+            geofilter_id, geofilter
+        )
         updated_geofilter['id'] = geofilter_id
         return updated_geofilter
 
@@ -953,15 +913,9 @@ class ConstellixProvider(BaseProvider):
                 params['recordOption'] = 'pools'
                 params.pop('roundRobin', None)
                 self.log.debug(
-                    "Creating record %s %s",
-                    new.zone.name,
-                    new._type
+                    "Creating record %s %s", new.zone.name, new._type
                 )
-                self._client.record_create(
-                    new.zone.name,
-                    new._type,
-                    params
-                )
+                self._client.record_create(new.zone.name, new._type, params)
             else:
                 # To use GeoIPFilter feature we need to enable it for domain
                 self.log.debug("Enabling domain %s geo support", domain_name)
@@ -978,14 +932,9 @@ class ConstellixProvider(BaseProvider):
                     }
                     params.pop('roundRobin', None)
                     self.log.debug(
-                        "Creating record %s %s",
-                        new.zone.name,
-                        new._type)
-                    self._client.record_create(
-                        new.zone.name,
-                        new._type,
-                        params
+                        "Creating record %s %s", new.zone.name, new._type
                     )
+                    self._client.record_create(new.zone.name, new._type, params)
 
                 # Now we can create the rest of records
                 for pool in pools:
@@ -998,13 +947,9 @@ class ConstellixProvider(BaseProvider):
                     }
                     params.pop('roundRobin', None)
                     self.log.debug(
-                        "Creating record %s %s",
-                        new.zone.name,
-                        new._type)
-                    self._client.record_create(
-                        new.zone.name,
-                        new._type,
-                        params)
+                        "Creating record %s %s", new.zone.name, new._type
+                    )
+                    self._client.record_create(new.zone.name, new._type, params)
 
     def _apply_Update(self, change, domain_name):
         self._apply_Delete(change, domain_name)
@@ -1018,8 +963,10 @@ class ConstellixProvider(BaseProvider):
         world_default_record = None
 
         for record in self.zone_records(zone):
-            if existing.name == record['name'] and \
-               existing._type == record['type']:
+            if (
+                existing.name == record['name']
+                and existing._type == record['type']
+            ):
 
                 # handle dynamic record
                 if record['recordOption'] == 'pools':
@@ -1033,60 +980,55 @@ class ConstellixProvider(BaseProvider):
                             self.log.debug(
                                 "Deleting record %s %s",
                                 zone.name,
-                                record['type'])
-                            self._client.record_delete(
-                                zone.name,
                                 record['type'],
-                                record['id'])
+                            )
+                            self._client.record_delete(
+                                zone.name, record['type'], record['id']
+                            )
                             # delete geofilter
-                            self.log.debug(
-                                "Deleting geofilter %s",
-                                zone.name)
+                            self.log.debug("Deleting geofilter %s", zone.name)
                             self._client.geofilter_delete(
-                                record['geolocation']['geoipFilter'])
+                                record['geolocation']['geoipFilter']
+                            )
 
                             # delete pool
                             self.log.debug(
-                                "Deleting pool %s %s",
-                                zone.name,
-                                record['type'])
+                                "Deleting pool %s %s", zone.name, record['type']
+                            )
                             self._client.pool_delete(
-                                record['type'],
-                                record['pools'][0])
+                                record['type'], record['pools'][0]
+                            )
 
                 # for all the rest records
                 else:
                     self._client.record_delete(
-                        zone.name, record['type'], record['id'])
+                        zone.name, record['type'], record['id']
+                    )
         # delete World Default
         if world_default_record:
             # delete record
             self.log.debug(
-                "Deleting record %s %s",
-                zone.name,
-                world_default_record['type']
+                "Deleting record %s %s", zone.name, world_default_record['type']
             )
             self._client.record_delete(
                 zone.name,
                 world_default_record['type'],
-                world_default_record['id']
+                world_default_record['id'],
             )
             # delete pool
             self.log.debug(
-                "Deleting pool %s %s",
-                zone.name,
-                world_default_record['type']
+                "Deleting pool %s %s", zone.name, world_default_record['type']
             )
             self._client.pool_delete(
-                world_default_record['type'],
-                world_default_record['pools'][0]
+                world_default_record['type'], world_default_record['pools'][0]
             )
 
     def _apply(self, plan):
         desired = plan.desired
         changes = plan.changes
-        self.log.debug('_apply: zone=%s, len(changes)=%d', desired.name,
-                       len(changes))
+        self.log.debug(
+            '_apply: zone=%s, len(changes)=%d', desired.name, len(changes)
+        )
 
         try:
             self._client.domain(desired.name)
@@ -1096,9 +1038,7 @@ class ConstellixProvider(BaseProvider):
 
         for change in changes:
             class_name = change.__class__.__name__
-            getattr(self, f'_apply_{class_name}')(
-                change,
-                desired.name)
+            getattr(self, f'_apply_{class_name}')(change, desired.name)
 
         # Clear out the cache if any
         self._zone_records.pop(desired.name, None)
