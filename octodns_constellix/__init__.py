@@ -25,17 +25,17 @@ class ConstellixClientException(ProviderException):
 class ConstellixClientBadRequest(ConstellixClientException):
     def __init__(self, resp):
         errors = '\n  - '.join(resp.json()['errors'])
-        super(ConstellixClientBadRequest, self).__init__(f'\n  - {errors}')
+        super().__init__(f'\n  - {errors}')
 
 
 class ConstellixClientUnauthorized(ConstellixClientException):
     def __init__(self):
-        super(ConstellixClientUnauthorized, self).__init__('Unauthorized')
+        super().__init__('Unauthorized')
 
 
 class ConstellixClientNotFound(ConstellixClientException):
     def __init__(self):
-        super(ConstellixClientNotFound, self).__init__('Not Found')
+        super().__init__('Not Found')
 
 
 class ConstellixClient(object):
@@ -277,17 +277,17 @@ class SonarClientException(ProviderException):
 class SonarClientBadRequest(SonarClientException):
     def __init__(self, resp):
         errors = resp.text
-        super(SonarClientBadRequest, self).__init__(f'\n  - {errors}')
+        super().__init__(f'\n  - {errors}')
 
 
 class SonarClientUnauthorized(SonarClientException):
     def __init__(self):
-        super(SonarClientUnauthorized, self).__init__('Unauthorized')
+        super().__init__('Unauthorized')
 
 
 class SonarClientNotFound(SonarClientException):
     def __init__(self):
-        super(SonarClientNotFound, self).__init__('Not Found')
+        super().__init__('Not Found')
 
 
 class SonarClient(object):
@@ -444,7 +444,7 @@ class ConstellixProvider(BaseProvider):
     ):
         self.log = logging.getLogger(f'ConstellixProvider[{id}]')
         self.log.debug('__init__: id=%s, api_key=***, secret_key=***', id)
-        super(ConstellixProvider, self).__init__(id, *args, **kwargs)
+        super().__init__(id, *args, **kwargs)
         self._client = ConstellixClient(api_key, secret_key, ratelimit_delay)
         self._sonar = SonarClient(
             self.log, api_key, secret_key, ratelimit_delay
