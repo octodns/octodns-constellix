@@ -409,7 +409,9 @@ class TestConstellixProvider(TestCase):
         del provider._zone_records[zone.name]
 
     def test_apply(self):
-        provider = ConstellixProvider('test', 'api', 'secret')
+        provider = ConstellixProvider(
+            'test', 'api', 'secret', strict_supports=False
+        )
 
         resp = Mock()
         resp.json = Mock()
@@ -627,7 +629,9 @@ class TestConstellixProvider(TestCase):
         )
 
     def test_apply_healthcheck(self):
-        provider = ConstellixProvider('test', 'api', 'secret')
+        provider = ConstellixProvider(
+            'test', 'api', 'secret', strict_supports=False
+        )
 
         resp = Mock()
         resp.json = Mock()
@@ -900,7 +904,9 @@ class TestConstellixProvider(TestCase):
         )
 
     def test_apply_healthcheck_world(self):
-        provider = ConstellixProvider('test', 'api', 'secret')
+        provider = ConstellixProvider(
+            'test', 'api', 'secret', strict_supports=False
+        )
 
         resp = Mock()
         resp.json = Mock()
@@ -1162,7 +1168,9 @@ class TestConstellixProvider(TestCase):
         )
 
     def test_apply_dynamic(self):
-        provider = ConstellixProvider('test', 'api', 'secret')
+        provider = ConstellixProvider(
+            'test', 'api', 'secret', strict_supports=False
+        )
 
         resp = Mock()
         resp.json = Mock()
