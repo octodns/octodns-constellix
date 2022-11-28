@@ -1,0 +1,81 @@
+[{
+	"id": 1808518,
+	"type": "A",
+	"recordType": "a",
+	"name": "www.geo",
+	"recordOption": "roundRobin",
+	"noAnswer": false,
+	"note": "",
+	"ttl": 300,
+	"gtdRegion": 1,
+	"parentId": 123123,
+	"parent": "domain",
+	"source": "Domain",
+	"modifiedTs": 1565150090588,
+	"value": ["2.2.3.4","2.2.3.5"],
+	"roundRobin": [{
+		"value": "2.2.3.4",
+		"disableFlag": false
+	}, {
+		"value": "2.2.3.5",
+		"disableFlag": false
+	}],
+	"geolocation": {
+		"geoipFilter": 5303
+	},
+	"recordFailover": {
+		"disabled": false,
+		"failoverType": 1,
+		"failoverTypeStr": "Normal (always lowest level)",
+		"values": []
+	},
+	"failover": {
+		"disabled": false,
+		"failoverType": 1,
+		"failoverTypeStr": "Normal (always lowest level)",
+		"values": []
+	},
+	"roundRobinFailover": [],
+	"pools": [],
+	"poolsDetail": []
+}, {
+	"id": 1808520,
+	"type": "A",
+	"recordType": "a",
+	"name": "www.geo",
+	"recordOption": "roundRobin",
+	"noAnswer": false,
+	"note": "",
+	"ttl": 300,
+	"gtdRegion": 1,
+	"parentId": 123123,
+	"parent": "domain",
+	"source": "Domain",
+	"modifiedTs": 1565150090588,
+	"value": ["1.2.3.4","1.2.3.5"],
+	"roundRobin": [{
+		"value": "1.2.3.4",
+		"disableFlag": false
+	}, {
+		"value": "1.2.3.5",
+		"disableFlag": false
+	}],
+	"geolocation": {
+		"geoipFilter": 1
+	},
+	"recordFailover": {
+		"disabled": false,
+		"failoverType": 1,
+		"failoverTypeStr": "Normal (always lowest level)",
+		"values": []
+	},
+	"failover": {
+		"disabled": false,
+		"failoverType": 1,
+		"failoverTypeStr": "Normal (always lowest level)",
+		"values": []
+	},
+	"roundRobinFailover": [],
+	"pools": [],
+	"poolsDetail": []
+}]
