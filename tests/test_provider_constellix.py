@@ -237,7 +237,9 @@ class TestConstellixProvider(TestCase):
         del provider._zone_records[zone.name]
 
     def test_apply(self):
-        provider = ConstellixProvider('test', 'api', 'secret')
+        provider = ConstellixProvider(
+            'test', 'api', 'secret', strict_supports=False
+        )
         expected = self.populate_expected('unit.tests.')
 
         # Add an ALIAS record
@@ -1155,7 +1157,9 @@ class TestConstellixProvider(TestCase):
         )
 
     def test_apply_dynamic(self):
-        provider = ConstellixProvider('test', 'api', 'secret')
+        provider = ConstellixProvider(
+            'test', 'api', 'secret', strict_supports=False
+        )
         expected = Zone('unit.tests.', [])
 
         # Add a dynamic record.
@@ -1745,7 +1749,9 @@ class TestConstellixProvider(TestCase):
         self.assertIsNone(plan)
 
     def test_dynamic_record_updates(self):
-        provider = ConstellixProvider('test', 'api', 'secret')
+        provider = ConstellixProvider(
+            'test', 'api', 'secret', strict_supports=False
+        )
 
         # Constellix API can return an error if you try and update a pool and
         # don't change anything, so let's test we handle it silently
@@ -2142,7 +2148,9 @@ class TestConstellixProvider(TestCase):
         self.assertEqual(global_geofilter, result)
 
     def test_unsupported_geo_warn(self):
-        provider = ConstellixProvider('test', 'api', 'secret')
+        provider = ConstellixProvider(
+            'test', 'api', 'secret', strict_supports=False
+        )
         zone = Zone('unit.tests.', [])
 
         with self.assertLogs() as captured:
@@ -2201,7 +2209,9 @@ class TestConstellixProvider(TestCase):
         )
 
     def test_unsupported_multi_warn(self):
-        provider = ConstellixProvider('test', 'api', 'secret')
+        provider = ConstellixProvider(
+            'test', 'api', 'secret', strict_supports=False
+        )
         zone = Zone('unit.tests.', [])
 
         with self.assertLogs() as captured:
