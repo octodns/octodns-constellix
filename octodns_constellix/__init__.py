@@ -2,18 +2,19 @@
 #
 #
 
-from collections import defaultdict
-from requests import Session
-from base64 import b64encode, standard_b64encode
-from pycountry_convert import country_alpha2_to_continent_code
 import hashlib
 import hmac
 import logging
 import time
+from base64 import b64encode, standard_b64encode
+from collections import defaultdict
 
-from octodns.record import Record
+from pycountry_convert import country_alpha2_to_continent_code
+from requests import Session
+
 from octodns.provider import ProviderException
 from octodns.provider.base import BaseProvider
+from octodns.record import Record
 
 __VERSION__ = '0.0.3'
 
@@ -912,7 +913,6 @@ class ConstellixProvider(BaseProvider):
     def _create_update_check(
         self, pool_type, check_name, check_type, value, port, interval, sites
     ):
-
         check = {
             'name': check_name,
             'host': value,
@@ -1040,7 +1040,6 @@ class ConstellixProvider(BaseProvider):
                 existing.name == record['name']
                 and existing._type == record['type']
             ):
-
                 # Handle dynamic record.
                 if (
                     record.get('geolocation')

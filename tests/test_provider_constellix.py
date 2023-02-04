@@ -2,22 +2,24 @@
 #
 #
 
-from os.path import dirname, join
-from requests import HTTPError
 import logging
-from requests_mock import ANY, mock as requests_mock
+from os.path import dirname, join
 from unittest import TestCase
 from unittest.mock import Mock, PropertyMock, call
 
-from octodns.record import Record
+from requests import HTTPError
+from requests_mock import ANY
+from requests_mock import mock as requests_mock
+
 from octodns.provider import SupportsException
 from octodns.provider.yaml import YamlProvider
+from octodns.record import Record
 from octodns.zone import Zone
 
 from octodns_constellix import (
-    ConstellixProvider,
-    ConstellixClientBadRequest,
     ConstellixClient,
+    ConstellixClientBadRequest,
+    ConstellixProvider,
 )
 
 
