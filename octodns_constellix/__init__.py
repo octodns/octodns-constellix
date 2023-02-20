@@ -319,7 +319,7 @@ class SonarClient(object):
         self._sess = Session()
         self._sess.headers = {
             'Content-Type': 'application/json',
-            'User-Agent': 'octoDNS',
+            'User-Agent': f'octodns/{octodns_version} octodns-constellix/{__VERSION__}',
         }
         self._agents = None
         self._checks = {'tcp': None, 'http': None}
