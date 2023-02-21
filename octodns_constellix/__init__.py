@@ -12,6 +12,7 @@ from collections import defaultdict
 from pycountry_convert import country_alpha2_to_continent_code
 from requests import Session
 
+from octodns import __VERSION__ as octodns_version
 from octodns.provider import ProviderException
 from octodns.provider.base import BaseProvider
 from octodns.record import Record
@@ -48,7 +49,12 @@ class ConstellixClient(object):
         self.secret_key = secret_key
         self.ratelimit_delay = ratelimit_delay
         self._sess = Session()
-        self._sess.headers.update({'x-cnsdns-apiKey': self.api_key})
+        self._sess.headers.update(
+            {
+                'x-cnsdns-apiKey': self.api_key,
+                'User-Agent': f'octodns/{octodns_version} octodns-constellix/{__VERSION__}',
+            }
+        )
         self._domains = None
         self._pools = {'A': None, 'AAAA': None, 'CNAME': None}
         self._geofilters = None
@@ -313,7 +319,7 @@ class SonarClient(object):
         self._sess = Session()
         self._sess.headers = {
             'Content-Type': 'application/json',
-            'User-Agent': 'octoDNS',
+            'User-Agent': f'octodns/{octodns_version} octodns-constellix/{__VERSION__}',
         }
         self._agents = None
         self._checks = {'tcp': None, 'http': None}
