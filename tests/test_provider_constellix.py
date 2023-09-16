@@ -50,6 +50,34 @@ class TestConstellixProvider(TestCase):
 
         return expected
 
+    def test_notes(self):
+        provider = ConstellixProvider('test', 'api', 'secret')
+
+        self.assertEqual({}, provider._parse_notes(None))
+        self.assertEqual({}, provider._parse_notes(''))
+        self.assertEqual({}, provider._parse_notes('blah-blah-blah'))
+
+        # Round tripping
+        data = {'key': 'value', 'priority': 1}
+        notes = provider._encode_notes(data)
+        self.assertEqual(data, provider._parse_notes(notes))
+
+        # integers come out as int
+        self.assertEqual(
+            {'rule-order': 1}, provider._parse_notes('rule-order:1')
+        )
+
+        # floats come out as strings (not currently used so not parsed)
+        self.assertEqual(
+            {'rule-order': '1.2'}, provider._parse_notes('rule-order:1.2')
+        )
+
+        # strings that start with integers are still strings
+        self.assertEqual(
+            {'rule-order': '1-thing'},
+            provider._parse_notes('rule-order:1-thing'),
+        )
+
     def test_populate(self):
         provider = ConstellixProvider('test', 'api', 'secret')
         expected = self.populate_expected('unit.tests.')
@@ -894,6 +922,7 @@ class TestConstellixProvider(TestCase):
                     '/domains/123123/records/A',
                     data={
                         'name': 'www.dynamic',
+                        'note': 'rule-order:0',
                         'ttl': 300,
                         'recordOption': 'pools',
                         'pools': [1808521],
@@ -1361,6 +1390,7 @@ class TestConstellixProvider(TestCase):
                     '/domains/123123/records/A',
                     data={
                         'name': 'www.dynamic',
+                        'note': 'rule-order:0',
                         'ttl': 300,
                         'recordOption': 'pools',
                         'pools': [1808522],
@@ -1372,6 +1402,7 @@ class TestConstellixProvider(TestCase):
                     '/domains/123123/records/A',
                     data={
                         'name': 'www.dynamic',
+                        'note': 'rule-order:1',
                         'ttl': 300,
                         'recordOption': 'pools',
                         'pools': [1808521],
@@ -1399,6 +1430,7 @@ class TestConstellixProvider(TestCase):
                     'id': 1808520,
                     'type': 'A',
                     'name': 'www.dynamic',
+                    'note': 'rule-order:0',
                     'geolocation': {'geoipFilter': 9303},
                     'recordOption': 'pools',
                     'ttl': 300,
@@ -1409,6 +1441,7 @@ class TestConstellixProvider(TestCase):
                     'id': 1808521,
                     'type': 'A',
                     'name': 'www.dynamic',
+                    'note': 'rule-order:1',
                     'geolocation': {'geoipFilter': 5303},
                     'recordOption': 'pools',
                     'ttl': 300,
@@ -1423,6 +1456,7 @@ class TestConstellixProvider(TestCase):
                 {
                     'id': 1808521,
                     'name': 'unit.tests.:www.dynamic:A:two',
+                    'note': 'rule-order:1',
                     'type': 'A',
                     'values': [
                         {'value': '1.2.3.4', 'weight': 2},
@@ -1432,6 +1466,7 @@ class TestConstellixProvider(TestCase):
                 {
                     'id': 1808522,
                     'name': 'unit.tests.:www.dynamic:A:one',
+                    'note': 'rule-order:0',
                     'type': 'A',
                     'values': [
                         {'value': '1.2.3.6', 'weight': 1},
@@ -1660,6 +1695,7 @@ class TestConstellixProvider(TestCase):
                     '/domains/123123/records/A',
                     data={
                         'name': 'www.dynamic',
+                        'note': 'rule-order:0',
                         'ttl': 600,
                         'pools': [1808522],
                         'recordOption': 'pools',
@@ -1671,6 +1707,7 @@ class TestConstellixProvider(TestCase):
                     '/domains/123123/records/A',
                     data={
                         'name': 'www.dynamic',
+                        'note': 'rule-order:1',
                         'ttl': 600,
                         'pools': [1808521],
                         'recordOption': 'pools',
@@ -1706,6 +1743,7 @@ class TestConstellixProvider(TestCase):
                     'id': 1808520,
                     'type': 'A',
                     'name': 'www.dynamic',
+                    'note': 'rule-order:0',
                     'geolocation': None,
                     'recordOption': 'pools',
                     'ttl': 300,
@@ -1764,6 +1802,7 @@ class TestConstellixProvider(TestCase):
                     'id': 1808520,
                     'type': 'A',
                     'name': 'www.dynamic',
+                    'note': 'rule-order:0',
                     'geolocation': {'geoipFilter': 1},
                     'recordOption': 'pools',
                     'ttl': 300,
@@ -1774,6 +1813,7 @@ class TestConstellixProvider(TestCase):
                     'id': 1808521,
                     'type': 'A',
                     'name': 'www.dynamic',
+                    'note': 'rule-order:1',
                     'geolocation': {'geoipFilter': 5303},
                     'recordOption': 'pools',
                     'ttl': 300,
