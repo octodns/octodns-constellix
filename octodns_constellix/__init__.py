@@ -546,7 +546,12 @@ class ConstellixProvider(BaseProvider):
                 # fetch options
                 notes = self._parse_notes(record.get('note', ''))
 
-                rule_order = notes['rule-order']
+                # For backwards compatibility we'll default to adding an order
+                # of 0 when rules were written by older versions that predated
+                # notes w/rule-order. The next time they're updated they'll have
+                # the correct rule-order values written and the fallback will no
+                # longer happen
+                rule_order = notes.get('rule-order', 0)
                 try:
                     rule = rules[rule_order]
                 except KeyError:

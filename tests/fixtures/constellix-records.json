@@ -701,7 +701,7 @@
 	"name": "www.dynamic",
 	"recordOption": "pools",
 	"noAnswer": false,
-	"note": "rule-order:0",
+	"note": "",
 	"ttl": 300,
 	"gtdRegion": 1,
 	"parentId": 123123,
