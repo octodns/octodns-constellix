@@ -485,6 +485,24 @@ class ConstellixProvider(BaseProvider):
         )
         self._zone_records = {}
 
+    def _encode_notes(self, data):
+        return ' '.join([f'{k}:{v}' for k, v in sorted(data.items())])
+
+    def _parse_notes(self, note):
+        data = {}
+        if note:
+            for piece in note.split(' '):
+                try:
+                    k, v = piece.split(':', 1)
+                except ValueError:
+                    continue
+                try:
+                    v = int(v)
+                except ValueError:
+                    pass
+                data[k] = v if v != '' else None
+        return data
+
     def _data_for_multiple(self, _type, records):
         if 1 == len(records):
             record = records[0]
@@ -512,7 +530,7 @@ class ConstellixProvider(BaseProvider):
     def _data_for_pools(self, _type, records):
         default_values = []
         pools = {}
-        rules = []
+        rules = {}
 
         for record in records:
             if record['recordOption'] == 'pools':
@@ -525,36 +543,47 @@ class ConstellixProvider(BaseProvider):
                     # fetch record geofilter data
                     geofilter_id = record['geolocation']['geoipFilter']
 
-                # populate rules
-                if geofilter_id == 1:
-                    rules.append({'pool': pool_name})
-                else:
+                # fetch options
+                notes = self._parse_notes(record.get('note', ''))
+
+                # For backwards compatibility we'll default to adding an order
+                # of 0 when rules were written by older versions that predated
+                # notes w/rule-order. The next time they're updated they'll have
+                # the correct rule-order values written and the fallback will no
+                # longer happen
+                rule_order = notes.get('rule-order', 0)
+                try:
+                    rule = rules[rule_order]
+                except KeyError:
+                    rule = {'pool': pool_name, '_order': rule_order}
+                    rules[rule_order] = rule
+
+                if geofilter_id != 1:
                     geofilter = self._client.geofilter_by_id(geofilter_id)
-                    geos = []
+                    geos = set()
 
                     if 'geoipContinents' in geofilter.keys():
                         for continent_code in geofilter['geoipContinents']:
-                            geos.append(continent_code)
+                            geos.add(continent_code)
 
                     if 'geoipCountries' in geofilter.keys():
                         for country_code in geofilter['geoipCountries']:
                             continent_code = country_alpha2_to_continent_code(
                                 country_code
                             )
-                            geos.append(f'{continent_code}-{country_code}')
+                            geos.add(f'{continent_code}-{country_code}')
 
                     if 'regions' in geofilter.keys():
                         for region in geofilter['regions']:
-                            geos.append(
+                            geos.add(
                                 f'{region["continentCode"]}-'
                                 f'{region["countryCode"]}-'
                                 f'{region["regionCode"]}'
                             )
-                    if 1 == len(geos) and 'default' == geos[0]:
-                        # Global filter on non-default id
-                        rules.append({'pool': pool_name})
-                    else:
-                        rules.append({'pool': pool_name, 'geos': sorted(geos)})
+                    if not (1 == len(geos) and 'default' in geos):
+                        # There are geos, combine them with any existing geos
+                        # for this pool; record the sorted unique set of them
+                        rule['geos'] = sorted(set(rule.get('geos', [])) | geos)
             elif (
                 'geolocation' in record.keys()
                 and record['geolocation'] is not None
@@ -591,7 +620,9 @@ class ConstellixProvider(BaseProvider):
         else:
             res['dynamic'] = {
                 'pools': dict(sorted(pools.items(), key=lambda t: t[0])),
-                'rules': sorted(rules, key=lambda t: t['pool']),
+                'rules': sorted(
+                    rules.values(), key=lambda t: (t['_order'], t['pool'])
+                ),
             }
 
         return res
@@ -871,6 +902,8 @@ class ConstellixProvider(BaseProvider):
             pool_name = rule.data.get('pool')
             full_pool_name = self._gen_pool_name(record, pool_name)
 
+            notes = {'rule-order': i}
+
             geofilter_obj = None
             # Now will create GeoFilter for the pool
             continents = []
@@ -894,6 +927,7 @@ class ConstellixProvider(BaseProvider):
             geofilter_obj = self._create_update_geofilter(
                 full_pool_name, continents, countries, regions
             )
+            geofilter_obj['note'] = self._encode_notes(notes)
             rules[full_pool_name] = geofilter_obj
 
         return rules
@@ -1026,6 +1060,7 @@ class ConstellixProvider(BaseProvider):
                         pool_params['geolocation'] = {
                             'geoipUserRegion': [rule['id']]
                         }
+                        pool_params['note'] = rule['note']
                     self._client.record_create(
                         new.zone.name, new._type, pool_params
                     )
