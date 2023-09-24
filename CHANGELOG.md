@@ -1,3 +1,8 @@
+## v0.0.4 - 2023-09-24 - ordering is important
+
+* Fix for presistent changes in dynamic rule ordering
+* All HTTP requests include a meaningful user agent
+
 ## v0.0.3 - 2022-11-28 - implicit fallback leads to changes
 
 * fix fallback attribute in dynamic to no longer be implicit
