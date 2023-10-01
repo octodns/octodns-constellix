@@ -247,7 +247,7 @@ class TestConstellixProvider(TestCase):
                 mock.get(f'{base}/domains', text=fh.read())
             with open('tests/fixtures/constellix-records.json') as fh:
                 mock.get(f'{base}/domains/123123/records', text=fh.read())
-            with open('tests/fixtures/constellix-pools.json') as fh:
+            with open('tests/fixtures/constellix-pools-A.json') as fh:
                 mock.get(f'{base}/pools/A', text=fh.read())
             with open('tests/fixtures/constellix-geofilters.json') as fh:
                 mock.get(f'{base}/geoFilters', text=fh.read())
