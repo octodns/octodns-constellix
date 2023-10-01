@@ -1,0 +1,120 @@
+[{
+  "id": 1808518,
+  "type": "A",
+  "recordType": "a",
+  "name": "www.dynamic",
+  "recordOption": "roundRobin",
+  "noAnswer": false,
+  "note": "",
+  "ttl": 300,
+  "gtdRegion": 1,
+  "parentId": 123123,
+  "parent": "domain",
+  "source": "Domain",
+  "modifiedTs": 1565150090588,
+  "value": ["2.2.3.4","2.2.3.5"],
+  "roundRobin": [{
+    "value": "2.2.3.4",
+    "disableFlag": false
+  }, {
+    "value": "2.2.3.5",
+    "disableFlag": false
+  }],
+  "geolocation": {
+    "geoipFilter": 1
+  },
+  "recordFailover": {
+    "disabled": false,
+    "failoverType": 1,
+    "failoverTypeStr": "Normal (always lowest level)",
+    "values": []
+  },
+  "failover": {
+    "disabled": false,
+    "failoverType": 1,
+    "failoverTypeStr": "Normal (always lowest level)",
+    "values": []
+  },
+  "roundRobinFailover": [],
+  "pools": [],
+  "poolsDetail": []
+}, {
+  "id": 1808520,
+  "type": "A",
+  "recordType": "a",
+  "name": "www.dynamic",
+  "recordOption": "pools",
+  "noAnswer": false,
+  "note": "rule-order:1",
+  "ttl": 300,
+  "gtdRegion": 1,
+  "parentId": 123123,
+  "parent": "domain",
+  "source": "Domain",
+  "modifiedTs": 1565150090588,
+  "value": [],
+  "roundRobin": [],
+  "geolocation": {
+    "geoipFilter": 9303
+  },
+  "recordFailover": {
+    "disabled": false,
+    "failoverType": 1,
+    "failoverTypeStr": "Normal (always lowest level)",
+    "values": []
+  },
+  "failover": {
+    "disabled": false,
+    "failoverType": 1,
+    "failoverTypeStr": "Normal (always lowest level)",
+    "values": []
+  },
+  "roundRobinFailover": [],
+  "pools": [
+    1808521
+  ],
+  "poolsDetail": [{
+    "id": 1808521,
+    "name": "unit.tests.:www.dynamic:A:two"
+  }]
+},
+{
+  "id": 1808521,
+  "type": "A",
+  "recordType": "a",
+  "name": "www.dynamic",
+  "recordOption": "pools",
+  "noAnswer": false,
+  "note": "",
+  "ttl": 300,
+  "gtdRegion": 1,
+  "parentId": 123123,
+  "parent": "domain",
+  "source": "Domain",
+  "modifiedTs": 1565150090588,
+  "value": [],
+  "roundRobin": [],
+  "geolocation": {
+    "geoipFilter": 5303
+  },
+  "recordFailover": {
+    "disabled": false,
+    "failoverType": 1,
+    "failoverTypeStr": "Normal (always lowest level)",
+    "values": []
+  },
+  "failover": {
+    "disabled": false,
+    "failoverType": 1,
+    "failoverTypeStr": "Normal (always lowest level)",
+    "values": []
+  },
+  "roundRobinFailover": [],
+  "pools": [
+    1808522
+  ],
+  "poolsDetail": [{
+    "id": 1808522,
+    "name": "unit.tests.:www.dynamic:A:one"
+  }]
+}]

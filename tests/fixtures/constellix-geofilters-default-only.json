@@ -1,0 +1,11 @@
+[
+    {
+        "id": 1,
+        "name": "World (Default)",
+        "filterRulesLimit": null,
+        "createdTs": null,
+        "modifiedTs": null,
+        "geoipContinents": ["default"],
+        "regions": []
+    }
+]
