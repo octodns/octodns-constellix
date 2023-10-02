@@ -2,6 +2,7 @@
 #
 #
 
+import json
 import logging
 from os.path import dirname, join
 from unittest import TestCase
@@ -136,15 +137,10 @@ class TestConstellixProvider(TestCase):
             )
         )
 
-        provider._client.geofilters = Mock(
-            return_value=[
-                {
-                    'id': 1,
-                    'name': 'World (Default)',
-                    'geoipContinents': ['default'],
-                }
-            ]
-        )
+        with open(
+            'tests/fixtures/constellix-geofilters-default-only.json'
+        ) as fh:
+            provider._client.geofilters = Mock(return_value=json.load(fh))
 
         # Bad auth
         with requests_mock() as mock:
@@ -1415,96 +1411,14 @@ class TestConstellixProvider(TestCase):
         provider._client._request.reset_mock()
         resp.json.reset_mock()
 
-        provider._client.records = Mock(
-            return_value=[
-                {
-                    'id': 1808518,
-                    'type': 'A',
-                    'name': 'www.dynamic',
-                    'geolocation': {'geoipFilter': 1},
-                    'ttl': 300,
-                    'recordOption': 'roundRobin',
-                    'value': ['1.2.3.4', '1.2.3.5'],
-                },
-                {
-                    'id': 1808520,
-                    'type': 'A',
-                    'name': 'www.dynamic',
-                    'note': 'rule-order:0',
-                    'geolocation': {'geoipFilter': 9303},
-                    'recordOption': 'pools',
-                    'ttl': 300,
-                    'value': [],
-                    'pools': [1808521],
-                },
-                {
-                    'id': 1808521,
-                    'type': 'A',
-                    'name': 'www.dynamic',
-                    'note': 'rule-order:1',
-                    'geolocation': {'geoipFilter': 5303},
-                    'recordOption': 'pools',
-                    'ttl': 300,
-                    'value': [],
-                    'pools': [1808522],
-                },
-            ]
-        )
+        with open('tests/fixtures/constellix-records-dynamic.json') as fh:
+            provider._client.records = Mock(return_value=json.load(fh))
 
-        provider._client.pools = Mock(
-            return_value=[
-                {
-                    'id': 1808521,
-                    'name': 'unit.tests.:www.dynamic:A:two',
-                    'note': 'rule-order:1',
-                    'type': 'A',
-                    'values': [
-                        {'value': '1.2.3.4', 'weight': 2},
-                        {'value': '1.2.3.5', 'weight': 4},
-                    ],
-                },
-                {
-                    'id': 1808522,
-                    'name': 'unit.tests.:www.dynamic:A:one',
-                    'note': 'rule-order:0',
-                    'type': 'A',
-                    'values': [
-                        {'value': '1.2.3.6', 'weight': 1},
-                        {'value': '1.2.3.7', 'weight': 1},
-                    ],
-                },
-            ]
-        )
+        with open('tests/fixtures/constellix-pools-A.json') as fh:
+            provider._client.pools = Mock(return_value=json.load(fh))
 
-        provider._client.geofilters = Mock(
-            return_value=[
-                {
-                    'id': 1,
-                    'name': 'World (Default)',
-                    'geoipContinents': ['default'],
-                },
-                {
-                    'id': 5303,
-                    'name': 'unit.tests.:www.dynamic:A:one',
-                    'filterRulesLimit': 100,
-                    'geoipContinents': ['AS', 'OC'],
-                    'geoipCountries': ['ES', 'SE', 'UA'],
-                    'regions': [
-                        {
-                            'continentCode': 'NA',
-                            'countryCode': 'CA',
-                            'regionCode': 'NL',
-                        }
-                    ],
-                },
-                {
-                    'id': 9303,
-                    'name': 'unit.tests.:www.dynamic:A:two',
-                    'filterRulesLimit': 100,
-                    'geoipContinents': ['default'],
-                },
-            ]
-        )
+        with open('tests/fixtures/constellix-geofilters.json') as fh:
+            provider._client.geofilters = Mock(return_value=json.load(fh))
 
         # Domain exists, we don't care about return
         resp_side_effect = [
@@ -1728,41 +1642,15 @@ class TestConstellixProvider(TestCase):
         # weighted pool - we'll be OK as we assume a weight of 1 for all
         # entries
         provider._client._request.reset_mock()
-        provider._client.records = Mock(
-            return_value=[
-                {
-                    'id': 1808518,
-                    'type': 'A',
-                    'name': 'www.dynamic',
-                    'geolocation': {'geoipFilter': 1},
-                    'ttl': 300,
-                    'recordOption': 'roundRobin',
-                    'value': ['1.2.3.4'],
-                },
-                {
-                    'id': 1808520,
-                    'type': 'A',
-                    'name': 'www.dynamic',
-                    'note': 'rule-order:0',
-                    'geolocation': None,
-                    'recordOption': 'pools',
-                    'ttl': 300,
-                    'value': [],
-                    'pools': [1808521],
-                },
-            ]
-        )
+        with open(
+            'tests/fixtures/constellix-records-dynamic-missing-geo.json'
+        ) as fh:
+            provider._client.records = Mock(return_value=json.load(fh))
 
-        provider._client.pools = Mock(
-            return_value=[
-                {
-                    'id': 1808521,
-                    'name': 'unit.tests.:www.dynamic:A:two',
-                    'type': 'A',
-                    'values': [{'value': '1.2.3.4', 'weight': 1}],
-                }
-            ]
-        )
+        with open(
+            'tests/fixtures/constellix-pools-A-two-simple-full-cache.json'
+        ) as fh:
+            provider._client.pools = Mock(return_value=json.load(fh))
 
         provider._client.geofilters = Mock(return_value=[])
 
@@ -1796,101 +1684,17 @@ class TestConstellixProvider(TestCase):
         # Constellix API can return an error if you try and update a pool and
         # don't change anything, so let's test we handle it silently
 
-        provider._client.records = Mock(
-            return_value=[
-                {
-                    'id': 1808520,
-                    'type': 'A',
-                    'name': 'www.dynamic',
-                    'note': 'rule-order:0',
-                    'geolocation': {'geoipFilter': 1},
-                    'recordOption': 'pools',
-                    'ttl': 300,
-                    'value': [],
-                    'pools': [1808521],
-                },
-                {
-                    'id': 1808521,
-                    'type': 'A',
-                    'name': 'www.dynamic',
-                    'note': 'rule-order:1',
-                    'geolocation': {'geoipFilter': 5303},
-                    'recordOption': 'pools',
-                    'ttl': 300,
-                    'value': [],
-                    'pools': [1808522],
-                },
-            ]
-        )
+        # The changes triggered by this initial setup will cover all branches
+        with open(
+            'tests/fixtures/constellix-records-dynamic-noop-changes.json'
+        ) as fh:
+            provider._client.records = Mock(return_value=json.load(fh))
 
-        provider._client.pools = Mock(
-            return_value=[
-                {
-                    'id': 1808521,
-                    'name': 'unit.tests.:www.dynamic:A:two',
-                    'type': 'A',
-                    'values': [
-                        {'value': '1.2.3.4', 'weight': 1},
-                        {'value': '1.2.3.5', 'weight': 1},
-                    ],
-                },
-                {
-                    'id': 1808522,
-                    'name': 'unit.tests.:www.dynamic:A:one',
-                    'type': 'A',
-                    'values': [
-                        {'value': '1.2.3.6', 'weight': 1},
-                        {'value': '1.2.3.7', 'weight': 1},
-                    ],
-                },
-            ]
-        )
+        with open('tests/fixtures/constellix-pools-A-full-cache.json') as fh:
+            provider._client.pools = Mock(return_value=json.load(fh))
 
-        provider._client.geofilters = Mock(
-            return_value=[
-                {
-                    'id': 1,
-                    'name': 'World (Default)',
-                    'geoipContinents': ['default'],
-                },
-                {
-                    'id': 6303,
-                    'name': 'some.other',
-                    'filterRulesLimit': 100,
-                    'createdTs': '2021-08-19T14:47:47Z',
-                    'modifiedTs': '2021-08-19T14:47:47Z',
-                    'geoipContinents': ['AS', 'OC'],
-                    'geoipCountries': ['ES', 'SE', 'UA'],
-                    'regions': [
-                        {
-                            'continentCode': 'NA',
-                            'countryCode': 'CA',
-                            'regionCode': 'NL',
-                        }
-                    ],
-                },
-                {
-                    'id': 5303,
-                    'name': 'unit.tests.:www.dynamic:A:one',
-                    'filterRulesLimit': 100,
-                    'geoipContinents': ['AS', 'OC'],
-                    'geoipCountries': ['ES', 'SE', 'UA'],
-                    'regions': [
-                        {
-                            'continentCode': 'NA',
-                            'countryCode': 'CA',
-                            'regionCode': 'NL',
-                        }
-                    ],
-                },
-                {
-                    'id': 9303,
-                    'name': 'unit.tests.:www.dynamic:A:two',
-                    'filterRulesLimit': 100,
-                    'geoipContinents': ['default'],
-                },
-            ]
-        )
+        with open('tests/fixtures/constellix-geofilters-other.json') as fh:
+            provider._client.geofilters = Mock(return_value=json.load(fh))
 
         wanted = Zone('unit.tests.', [])
 
@@ -1901,23 +1705,41 @@ class TestConstellixProvider(TestCase):
                 {
                     'ttl': 300,
                     'type': 'A',
-                    'values': ['1.2.3.4'],
+                    'values': ['2.2.3.4'],
                     'dynamic': {
                         'pools': {
                             'one': {
                                 'fallback': 'two',
                                 'values': [
                                     {'value': '1.2.3.6', 'weight': 1},
-                                    {'value': '1.2.3.7', 'weight': 1},
+                                    {
+                                        'value': '1.2.3.7',
+                                        'weight': 1,
+                                        'status': 'down',
+                                    },
                                 ],
                             },
                             'two': {
-                                'values': [{'value': '1.2.3.4', 'weight': 1}]
+                                'values': [
+                                    {'value': '1.2.3.4', 'weight': 1},
+                                    {
+                                        'value': '1.2.3.5',
+                                        'weight': 1,
+                                        'status': 'up',
+                                    },
+                                ]
                             },
                         },
                         'rules': [
                             {
-                                'geos': ['AS', 'EU-ES', 'EU-UA', 'EU-SE', 'OC'],
+                                'geos': [
+                                    'AS',
+                                    'EU-ES',
+                                    'EU-UA',
+                                    'EU-SE',
+                                    'NA-CA-NL',
+                                    'OC',
+                                ],
                                 'pool': 'one',
                             },
                             {'pool': 'two'},

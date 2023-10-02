@@ -1,0 +1,24 @@
+[
+    {
+        "id": 1808520,
+        "type": "A",
+        "name": "www.dynamic",
+        "note": "rule-order:0",
+        "geolocation": {"geoipFilter": 1},
+        "recordOption": "pools",
+        "ttl": 300,
+        "value": [],
+        "pools": [1808521]
+    },
+    {
+        "id": 1808521,
+        "type": "A",
+        "name": "www.dynamic",
+        "note": "rule-order:1",
+        "geolocation": {"geoipFilter": 5303},
+        "recordOption": "pools",
+        "ttl": 300,
+        "value": [],
+        "pools": [1808522]
+    }
+]
