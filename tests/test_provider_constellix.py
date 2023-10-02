@@ -6,7 +6,7 @@ import json
 import logging
 from os.path import dirname, join
 from unittest import TestCase
-from unittest.mock import Mock, PropertyMock, call
+from unittest.mock import Mock, call
 
 from requests import HTTPError
 from requests_mock import ANY
@@ -20,6 +20,7 @@ from octodns.zone import Zone
 from octodns_constellix import (
     ConstellixClient,
     ConstellixClientBadRequest,
+    ConstellixClientException,
     ConstellixProvider,
 )
 
@@ -107,14 +108,29 @@ class TestConstellixProvider(TestCase):
                         'pools': {
                             'one': {
                                 'values': [
-                                    {'value': '1.2.3.6', 'weight': 1},
-                                    {'value': '1.2.3.7', 'weight': 1},
+                                    {
+                                        'value': '1.2.3.6',
+                                        'weight': 1,
+                                    },  # implicit obey
+                                    {
+                                        'value': '1.2.3.7',
+                                        'weight': 1,
+                                        'status': 'down',
+                                    },
                                 ]
                             },
                             'two': {
                                 'values': [
-                                    {'value': '1.2.3.4', 'weight': 1},
-                                    {'value': '1.2.3.5', 'weight': 1},
+                                    {
+                                        'value': '1.2.3.4',
+                                        'weight': 1,
+                                        'status': 'obey',
+                                    },
+                                    {
+                                        'value': '1.2.3.5',
+                                        'weight': 1,
+                                        'status': 'up',
+                                    },
                                 ]
                             },
                         },
@@ -245,6 +261,10 @@ class TestConstellixProvider(TestCase):
                 mock.get(f'{base}/domains/123123/records', text=fh.read())
             with open('tests/fixtures/constellix-pools-A.json') as fh:
                 mock.get(f'{base}/pools/A', text=fh.read())
+            with open('tests/fixtures/constellix-pool-A-two.json') as fh:
+                mock.get(f'{base}/pools/A/1808521', text=fh.read())
+            with open('tests/fixtures/constellix-pool-A-one.json') as fh:
+                mock.get(f'{base}/pools/A/1808522', text=fh.read())
             with open('tests/fixtures/constellix-geofilters.json') as fh:
                 mock.get(f'{base}/geoFilters', text=fh.read())
 
@@ -697,7 +717,7 @@ class TestConstellixProvider(TestCase):
             ]
         )
 
-    def test_apply_healthcheck(self):
+    def test_apply_custom_healthcheck(self):
         provider = ConstellixProvider('test', 'api', 'secret')
         expected = Zone('unit.tests.', [])
 
@@ -791,57 +811,64 @@ class TestConstellixProvider(TestCase):
         ]
         resp.json.side_effect = resp_side_effect
 
-        sonar_resp = Mock()
-        sonar_resp.json = Mock()
-        type(sonar_resp).headers = PropertyMock(
-            return_value={
-                'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52906'
-            }
-        )
-        sonar_resp.headers = Mock()
-        provider._sonar._request = Mock(return_value=sonar_resp)
-
+        provider._sonar._request = Mock()
         sonar_resp_side_effect = [
-            [
+            (
+                [
+                    {
+                        'id': 1,
+                        'name': 'USWAS01',
+                        'label': 'Site 1',
+                        'location': 'Washington, DC, U.S.A',
+                        'country': 'U.S.A',
+                        'region': 'ASIAPAC',
+                    },
+                    {
+                        'id': 23,
+                        'name': 'CATOR01',
+                        'label': 'Site 1',
+                        'location': 'Toronto,Canada',
+                        'country': 'Canada',
+                        'region': 'EUROPE',
+                    },
+                    {
+                        'id': 25,
+                        'name': 'CATOR01',
+                        'label': 'Site 1',
+                        'location': 'Toronto,Canada',
+                        'country': 'Canada',
+                        'region': 'OCEANIA',
+                    },
+                ],
+                {},
+            ),  # available agents
+            (
+                [{'id': 52, 'name': 'unit.tests.:www.dynamic:A:two-1.2.3.4'}],
+                {},
+            ),  # initial checks
+            ({}, {}),  # DELETE .../tcp/52
+            (
+                {},
                 {
-                    'id': 1,
-                    'name': 'USWAS01',
-                    'label': 'Site 1',
-                    'location': 'Washington, DC, U.S.A',
-                    'country': 'U.S.A',
-                    'region': 'ASIAPAC',
+                    'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52906'
                 },
+            ),  # POST .../tcp
+            (
+                {'id': 52906, 'name': 'unit.tests.:www.dynamic:A:two-1.2.3.4'},
+                {},
+            ),  # check_create GET data
+            (
+                {},
                 {
-                    'id': 23,
-                    'name': 'CATOR01',
-                    'label': 'Site 1',
-                    'location': 'Toronto,Canada',
-                    'country': 'Canada',
-                    'region': 'EUROPE',
+                    'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52907'
                 },
-                {
-                    'id': 25,
-                    'name': 'CATOR01',
-                    'label': 'Site 1',
-                    'location': 'Toronto,Canada',
-                    'country': 'Canada',
-                    'region': 'OCEANIA',
-                },
-            ],  # available agents
-            [
-                {'id': 52, 'name': 'unit.tests.:www.dynamic:A:two-1.2.3.4'}
-            ],  # initial checks
-            {'type': 'TCP'},
-            {
-                'id': 52906,
-                'name': 'unit.tests.:www.dynamic:A:two-1.2.3.4',
-            },  # check_create GET data
-            {
-                'id': 52907,
-                'name': 'unit.tests.:www.dynamic:A:two-1.2.3.5',
-            },  # check_create GET data
+            ),  # POST .../tcp
+            (
+                {'id': 52907, 'name': 'unit.tests.:www.dynamic:A:two-1.2.3.5'},
+                {},
+            ),  # check_create GET data
         ]
-        sonar_resp.json.side_effect = sonar_resp_side_effect
+        provider._sonar._request.side_effect = sonar_resp_side_effect
 
         plan = provider.plan(expected)
 
@@ -929,10 +956,8 @@ class TestConstellixProvider(TestCase):
         )
 
         # Check nothing else happened in sonar:
-        # +2 for two check_create calls, +1 for one check_delete call
-        # these methods have two API calls but only one .json() call
         self.assertEqual(
-            len(sonar_resp_side_effect) + 3, provider._sonar._request.call_count
+            len(sonar_resp_side_effect), provider._sonar._request.call_count
         )
 
         # Check what happened in sonar
@@ -940,7 +965,6 @@ class TestConstellixProvider(TestCase):
             [
                 call('GET', '/system/sites'),
                 call('GET', '/tcp'),
-                call('GET', '/check/type/52'),
                 call('DELETE', '/tcp/52'),  # recreate, same name
                 call(
                     'POST',
@@ -954,18 +978,7 @@ class TestConstellixProvider(TestCase):
                         'ipVersion': 'IPV4',
                     },
                 ),  # only returns 201 / created with new ID in header
-                call(
-                    'GET',
-                    '/tcp/52906',
-                    data={
-                        'name': 'unit.tests.:www.dynamic:A:two-1.2.3.4',
-                        'host': '1.2.3.4',
-                        'port': 80,
-                        'checkSites': [1],
-                        'interval': 'ONEMINUTE',
-                        'ipVersion': 'IPV4',
-                    },
-                ),
+                call('GET', '/tcp/52906'),  # fetch newly created entry
                 call(
                     'POST',
                     '/tcp',
@@ -978,18 +991,7 @@ class TestConstellixProvider(TestCase):
                         'ipVersion': 'IPV4',
                     },
                 ),  # only returns 201 / created with new ID in header
-                call(
-                    'GET',
-                    '/tcp/52906',
-                    data={
-                        'name': 'unit.tests.:www.dynamic:A:two-1.2.3.5',
-                        'host': '1.2.3.5',
-                        'port': 80,
-                        'checkSites': [1],
-                        'interval': 'ONEMINUTE',
-                        'ipVersion': 'IPV4',
-                    },
-                ),
+                call('GET', '/tcp/52907'),  # fetch newly created entry
             ]
         )
 
@@ -1076,38 +1078,44 @@ class TestConstellixProvider(TestCase):
         ]
         resp.json.side_effect = resp_side_effect
 
-        sonar_resp = Mock()
-        sonar_resp.json = Mock()
-        type(sonar_resp).headers = PropertyMock(
-            return_value={
-                'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52906'
-            }
-        )
-        sonar_resp.headers = Mock()
-        provider._sonar._request = Mock(return_value=sonar_resp)
-
-        sonar_resp.json.side_effect = [
-            [
+        provider._sonar._request = Mock()
+        provider._sonar._request.side_effect = [
+            (
+                [
+                    {
+                        'id': 1,
+                        'name': 'USWAS01',
+                        'label': 'Site 1',
+                        'location': 'Washington, DC, U.S.A',
+                        'country': 'U.S.A',
+                        'region': 'ASIAPAC',
+                    },
+                    {
+                        'id': 23,
+                        'name': 'CATOR01',
+                        'label': 'Site 1',
+                        'location': 'Toronto,Canada',
+                        'country': 'Canada',
+                        'region': 'EUROPE',
+                    },
+                ],
+                {},
+            ),  # available agents
+            ([], {}),  # no checks
+            (
+                {},
                 {
-                    'id': 1,
-                    'name': 'USWAS01',
-                    'label': 'Site 1',
-                    'location': 'Washington, DC, U.S.A',
-                    'country': 'U.S.A',
-                    'region': 'ASIAPAC',
+                    'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52906'
                 },
+            ),
+            ({'id': 52906, 'name': 'check1'}, {}),
+            (
+                {},
                 {
-                    'id': 23,
-                    'name': 'CATOR01',
-                    'label': 'Site 1',
-                    'location': 'Toronto,Canada',
-                    'country': 'Canada',
-                    'region': 'EUROPE',
+                    'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52907'
                 },
-            ],  # available agents
-            [],  # no checks
-            {'id': 52906, 'name': 'check1'},
-            {'id': 52907, 'name': 'check2'},
+            ),
+            ({'id': 52907, 'name': 'check2'}, {}),
         ]
 
         plan = provider.plan(expected)
@@ -1188,7 +1196,6 @@ class TestConstellixProvider(TestCase):
             'test', 'api', 'secret', strict_supports=False
         )
         expected = Zone('unit.tests.', [])
-
         # Add a dynamic record.
         expected.add_record(
             Record.new(
@@ -1203,14 +1210,26 @@ class TestConstellixProvider(TestCase):
                             'one': {
                                 'fallback': 'two',
                                 'values': [
-                                    {'value': '1.2.3.6', 'weight': 1},
-                                    {'value': '1.2.3.7', 'weight': 1},
+                                    {
+                                        'value': '1.2.3.6',
+                                        'weight': 1,
+                                    },  # implicit status: obey
+                                    {
+                                        'value': '1.2.3.7',
+                                        'weight': 1,
+                                    },  # implicit status: obey
                                 ],
                             },
                             'two': {
                                 'values': [
-                                    {'value': '1.2.3.4', 'weight': 2},
-                                    {'value': '1.2.3.5', 'weight': 4},
+                                    {
+                                        'value': '1.2.3.4',
+                                        'weight': 2,
+                                    },  # implicit status: obey
+                                    {
+                                        'value': '1.2.3.5',
+                                        'weight': 4,
+                                    },  # implicit status: obey
                                 ]
                             },
                         },
@@ -1233,12 +1252,14 @@ class TestConstellixProvider(TestCase):
             )
         )
 
-        resp = Mock()
-        resp.json = Mock()
-        provider._client._request = Mock(return_value=resp)
+        client_resp = Mock()
+        client_resp.json = Mock()
+        provider._client._request = Mock(return_value=client_resp)
+
+        provider._sonar._request = Mock()
 
         # non-existent domain, create everything
-        resp_side_effect = [
+        client_resp_side_effect = [
             [],  # no domains returned during populate
             [{'id': 123123, 'name': 'unit.tests'}],  # domain created in apply
             [],  # No pools returned during populate
@@ -1285,11 +1306,77 @@ class TestConstellixProvider(TestCase):
                 'hasGeoIP': False,
             },  # domain listed for enabling geo
             [],  # enabling geo
-            [],
-            [],
-            [],
+            [],  # create A record
+            [],  # create A record
+            [],  # create A record
         ]
-        resp.json.side_effect = resp_side_effect
+        client_resp.json.side_effect = client_resp_side_effect
+
+        sonar_resp_side_effect = [
+            (
+                [
+                    {
+                        'id': 1,
+                        'name': 'USWAS01',
+                        'label': 'Site 1',
+                        'location': 'Washington, DC, U.S.A',
+                        'country': 'U.S.A',
+                        'region': 'ASIAPAC',
+                    },
+                    {
+                        'id': 23,
+                        'name': 'CATOR01',
+                        'label': 'Site 1',
+                        'location': 'Toronto,Canada',
+                        'country': 'Canada',
+                        'region': 'EUROPE',
+                    },
+                ],
+                {},
+            ),  # GET .../sites
+            ({}, {}),  # GET .../http
+            (
+                {},
+                {
+                    'Location': 'http://api.sonar.constellix.com/rest/api/http/5678'
+                },
+            ),  # POST .../http
+            (
+                {'id': 5678, 'name': 'unit.tests.:www.dynamic:A:one-1.2.3.6'},
+                {},
+            ),  # GET .../http/5678
+            (
+                {},
+                {
+                    'Location': 'http://api.sonar.constellix.com/rest/api/http/5789'
+                },
+            ),  # POST .../http
+            (
+                {'id': 5789, 'name': 'unit.tests.:www.dynamic:A:one-1.2.3.7'},
+                {},
+            ),  # GET .../http/5789
+            (
+                {},
+                {
+                    'Location': 'http://api.sonar.constellix.com/rest/api/http/6678'
+                },
+            ),  # POST .../http
+            (
+                {'id': 6678, 'name': 'unit.tests.:www.dynamic:A:one-1.2.3.4'},
+                {},
+            ),  # GET .../http/6678
+            (
+                {},
+                {
+                    'Location': 'http://api.sonar.constellix.com/rest/api/http/6789'
+                },
+            ),  # POST .../http
+            (
+                {'id': 6789, 'name': 'unit.tests.:www.dynamic:A:one-1.2.3.5'},
+                {},
+            ),  # GET .../http/6789
+        ]
+        provider._sonar._request.side_effect = sonar_resp_side_effect
 
         plan = provider.plan(expected)
 
@@ -1300,7 +1387,10 @@ class TestConstellixProvider(TestCase):
 
         # Check that nothing else happened in apply.
         self.assertEqual(
-            len(resp_side_effect), provider._client._request.call_count
+            len(client_resp_side_effect), provider._client._request.call_count
+        )
+        self.assertEqual(
+            len(sonar_resp_side_effect), provider._sonar._request.call_count
         )
 
         # Check what happened in apply.
@@ -1320,8 +1410,18 @@ class TestConstellixProvider(TestCase):
                         'numReturn': 1,
                         'minAvailableFailover': 1,
                         'values': [
-                            {'value': '1.2.3.6', 'weight': 1},
-                            {'value': '1.2.3.7', 'weight': 1},
+                            {
+                                'value': '1.2.3.6',
+                                'weight': 1,
+                                'policy': 'followsonar',
+                                'checkId': 5678,
+                            },
+                            {
+                                'value': '1.2.3.7',
+                                'weight': 1,
+                                'policy': 'followsonar',
+                                'checkId': 5789,
+                            },
                         ],
                     },
                 ),
@@ -1334,8 +1434,18 @@ class TestConstellixProvider(TestCase):
                         'numReturn': 1,
                         'minAvailableFailover': 1,
                         'values': [
-                            {'value': '1.2.3.4', 'weight': 2},
-                            {'value': '1.2.3.5', 'weight': 4},
+                            {
+                                'value': '1.2.3.4',
+                                'weight': 2,
+                                'policy': 'followsonar',
+                                'checkId': 6678,
+                            },
+                            {
+                                'value': '1.2.3.5',
+                                'weight': 4,
+                                'policy': 'followsonar',
+                                'checkId': 6789,
+                            },
                         ],
                     },
                 ),
@@ -1409,7 +1519,8 @@ class TestConstellixProvider(TestCase):
         )
 
         provider._client._request.reset_mock()
-        resp.json.reset_mock()
+        client_resp.json.reset_mock()
+        provider._sonar._request.reset_mock()
 
         with open('tests/fixtures/constellix-records-dynamic.json') as fh:
             provider._client.records = Mock(return_value=json.load(fh))
@@ -1421,14 +1532,48 @@ class TestConstellixProvider(TestCase):
             provider._client.geofilters = Mock(return_value=json.load(fh))
 
         # Domain exists, we don't care about return
-        resp_side_effect = [
+        client_resp_side_effect = [
+            # at this point we have a mocked pools list without details only
+            # plan() will fetch the details here
+            {
+                'id': 1808521,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'note': 'rule-order:1',
+                'type': 'A',
+                'values': [
+                    {
+                        'value': '1.2.3.4',
+                        'weight': 2,
+                        'policy': 'followsonar',
+                        'checkId': 6678,
+                    },
+                    {'value': '1.2.3.5', 'weight': 4, 'policy': 'alwayson'},
+                ],
+                'failedFlag': False,
+            },  # get pool - no list
+            {
+                'id': 1808522,
+                'name': 'unit.tests.:www.dynamic:A:one',
+                'note': 'rule-order:0',
+                'type': 'A',
+                'values': [
+                    {
+                        'value': '1.2.3.6',
+                        'weight': 1,
+                        'policy': 'followsonar',
+                        'checkId': 5678,
+                    },
+                    {'value': '1.2.3.7', 'weight': 1, 'policy': 'alwaysoff'},
+                ],
+                'failedFlag': False,
+            },  # get pool - no list
             [],  # get domain
             [],  # delete A
             [],  # delete geofilter
-            [],  # delete pool
+            [],  # delete pool 1808521 - BUG
             [],  # delete A
             [],  # delete geofilter
-            [],  # delete pool
+            [],  # delete pool 1808521 - BUG
             [],  # delete A
             {
                 'id': 1808522,
@@ -1438,19 +1583,57 @@ class TestConstellixProvider(TestCase):
                     {'value': '1.2.3.6', 'weight': 5},
                     {'value': '1.2.3.7', 'weight': 2},
                 ],
-            },  # update pool - no list
+                'failedFlag': False,
+            },  # fetch pool - buggy DELETE busted the cache
+            {
+                'success': 'Record Pool unit.tests.:www.dynamic:A:one updated successfully'
+            },  # update pool - only success message
+            {
+                'id': 1808522,
+                'name': 'unit.tests.:www.dynamic:A:one',
+                'type': 'A',
+                'values': [
+                    {'value': '1.2.3.6', 'weight': 5},
+                    {'value': '1.2.3.7', 'weight': 2},
+                ],
+                'failedFlag': False,
+            },  # refetch pool
             {
                 'id': 1808521,
                 'name': 'unit.tests.:www.dynamic:A:two',
+                'note': 'rule-order:1',
                 'type': 'A',
-                'values': [{'value': '1.2.3.4', 'weight': 1}],
-            },  # update pool - no list
+                'values': [
+                    {'value': '1.2.3.5', 'weight': 1, 'policy': 'alwayson'}
+                ],
+                'failedFlag': False,
+            },  # fetch pool - buggy DELETE busted the cache
+            {
+                'success': 'Record Pool unit.tests.:www.dynamic:A:two updated successfully'
+            },  # update pool - only success message
+            {
+                'id': 1808521,
+                'name': 'unit.tests.:www.dynamic:A:two',
+                'note': 'rule-order:1',
+                'type': 'A',
+                'values': [
+                    {'value': '1.2.3.5', 'weight': 1, 'policy': 'alwayson'}
+                ],
+                'failedFlag': False,
+            },  # refetch pool
             [
                 {
                     'id': 1808523,
                     'name': 'unit.tests.:www.dynamic:A:fallback',
                     'type': 'A',
-                    'values': [{'value': '9.9.9.9', 'weight': 1}],
+                    'values': [
+                        {
+                            'value': '9.9.9.9',
+                            'weight': 1,
+                            'policy': 'followsonar',
+                        }
+                    ],
+                    'failedFlag': False,
                 }
             ],  # create pool - list
             {},
@@ -1465,7 +1648,33 @@ class TestConstellixProvider(TestCase):
             [],
             [],
         ]
-        resp.json.side_effect = resp_side_effect
+        client_resp.json.side_effect = client_resp_side_effect
+
+        sonar_resp_side_effect = [
+            ({}, {}),  # DELETE .../http/5678
+            (
+                {},
+                {'Location': 'http://api.sonar.constellix.com/rest/api/5678'},
+            ),  # POST .../http
+            (
+                {'id': 5678, 'name': 'unit.tests.:www.dynamic:A:one-1.2.3.6'},
+                {},
+            ),  # GET .../http/5678
+            ({}, {}),  # DELETE .../http/5789
+            # ({},{}),  # DELETE .../http/6789
+            (
+                {},
+                {'Location': 'http://api.sonar.constellix.com/rest/api/9678'},
+            ),  # POST .../http
+            (
+                {
+                    'id': 9678,
+                    'name': 'unit.tests.:www.dynamic:A:fallback-9.9.9.9',
+                },
+                {},
+            ),  # GET .../http/9678
+        ]
+        provider._sonar._request.side_effect = sonar_resp_side_effect
 
         wanted = Zone('unit.tests.', [])
         wanted.add_record(
@@ -1481,13 +1690,27 @@ class TestConstellixProvider(TestCase):
                             'one': {
                                 'fallback': 'two',
                                 'values': [
-                                    {'value': '1.2.3.6', 'weight': 5},
-                                    {'value': '1.2.3.7', 'weight': 2},
+                                    {
+                                        'value': '1.2.3.6',
+                                        'weight': 5,
+                                        'status': 'obey',
+                                    },
+                                    {
+                                        'value': '1.2.3.7',
+                                        'weight': 2,
+                                        'status': 'down',
+                                    },
                                 ],
                             },
                             'two': {
                                 'fallback': 'fallback',
-                                'values': [{'value': '1.2.3.4', 'weight': 1}],
+                                'values': [
+                                    {
+                                        'value': '1.2.3.5',
+                                        'weight': 1,
+                                        'status': 'up',
+                                    }
+                                ],
                             },
                             'fallback': {  # fallback pool without rule
                                 'values': [{'value': '9.9.9.9'}]
@@ -1517,20 +1740,32 @@ class TestConstellixProvider(TestCase):
         self.assertEqual(1, provider.apply(plan))
 
         self.assertEqual(
-            len(resp_side_effect), provider._client._request.call_count
+            len(client_resp_side_effect), provider._client._request.call_count
+        )
+        self.assertEqual(
+            len(sonar_resp_side_effect), provider._sonar._request.call_count
         )
 
         # recreate for update, and deletes for the 2 parts of the other
         provider._client._request.assert_has_calls(
             [
+                call(
+                    'GET', '/pools/A/1808521'
+                ),  # only mocked pools response, plan() will need to fetch details
+                call(
+                    'GET', '/pools/A/1808522'
+                ),  # only mocked pools response, plan() will need to fetch details
                 call('GET', '/domains/123123'),
                 call('DELETE', '/domains/123123/records/A/1808520'),
                 call('DELETE', '/geoFilters/9303'),
-                call('DELETE', '/pools/A/1808521'),
+                call('DELETE', '/pools/A/1808521'),  # BUG
                 call('DELETE', '/domains/123123/records/A/1808521'),
                 call('DELETE', '/geoFilters/5303'),
-                call('DELETE', '/pools/A/1808522'),
+                call('DELETE', '/pools/A/1808522'),  # BUG
                 call('DELETE', '/domains/123123/records/A/1808518'),
+                call(
+                    'GET', '/pools/A/1808522'
+                ),  # fetch pool - buggy DELETE busted the cache
                 call(
                     'PUT',
                     '/pools/A/1808522',
@@ -1540,11 +1775,26 @@ class TestConstellixProvider(TestCase):
                         'numReturn': 1,
                         'minAvailableFailover': 1,
                         'values': [
-                            {'value': '1.2.3.6', 'weight': 5},
-                            {'value': '1.2.3.7', 'weight': 2},
+                            {
+                                'value': '1.2.3.6',
+                                'weight': 5,
+                                'policy': 'followsonar',
+                                'checkId': 5678,
+                            },
+                            {
+                                'value': '1.2.3.7',
+                                'weight': 2,
+                                'policy': 'alwaysoff',
+                            },
                         ],
                     },
                 ),
+                call(
+                    'GET', '/pools/A/1808522'
+                ),  # PUT does not return the new value, refetch
+                call(
+                    'GET', '/pools/A/1808521'
+                ),  # fetch pool - buggy DELETE busted the cache
                 call(
                     'PUT',
                     '/pools/A/1808521',
@@ -1553,9 +1803,18 @@ class TestConstellixProvider(TestCase):
                         'type': 'A',
                         'numReturn': 1,
                         'minAvailableFailover': 1,
-                        'values': [{'value': '1.2.3.4', 'weight': 1}],
+                        'values': [
+                            {
+                                'value': '1.2.3.5',
+                                'weight': 1,
+                                'policy': 'alwayson',
+                            }
+                        ],
                     },
                 ),
+                call(
+                    'GET', '/pools/A/1808521'
+                ),  # PUT does not return the new value, refetch
                 call(
                     'POST',
                     '/pools/A',
@@ -1564,7 +1823,14 @@ class TestConstellixProvider(TestCase):
                         'type': 'A',
                         'numReturn': 1,
                         'minAvailableFailover': 1,
-                        'values': [{'value': '9.9.9.9', 'weight': 1}],
+                        'values': [
+                            {
+                                'value': '9.9.9.9',
+                                'weight': 1,
+                                'policy': 'followsonar',
+                                'checkId': 9678,
+                            }
+                        ],
                     },
                 ),
                 call(
@@ -1609,11 +1875,11 @@ class TestConstellixProvider(TestCase):
                     '/domains/123123/records/A',
                     data={
                         'name': 'www.dynamic',
-                        'note': 'rule-order:0',
                         'ttl': 600,
-                        'pools': [1808522],
                         'recordOption': 'pools',
+                        'pools': [1808522],
                         'geolocation': {'geoipUserRegion': [5303]},
+                        'note': 'rule-order:0',
                     },
                 ),
                 call(
@@ -1621,11 +1887,11 @@ class TestConstellixProvider(TestCase):
                     '/domains/123123/records/A',
                     data={
                         'name': 'www.dynamic',
-                        'note': 'rule-order:1',
                         'ttl': 600,
-                        'pools': [1808521],
                         'recordOption': 'pools',
+                        'pools': [1808521],
                         'geolocation': {'geoipUserRegion': [9303]},
+                        'note': 'rule-order:1',
                     },
                 ),
             ]
@@ -1642,6 +1908,7 @@ class TestConstellixProvider(TestCase):
         # weighted pool - we'll be OK as we assume a weight of 1 for all
         # entries
         provider._client._request.reset_mock()
+
         with open(
             'tests/fixtures/constellix-records-dynamic-missing-geo.json'
         ) as fh:
@@ -1711,21 +1978,29 @@ class TestConstellixProvider(TestCase):
                             'one': {
                                 'fallback': 'two',
                                 'values': [
-                                    {'value': '1.2.3.6', 'weight': 1},
+                                    {
+                                        'value': '1.2.3.6',
+                                        'weight': 1,
+                                        'status': 'down',
+                                    },
                                     {
                                         'value': '1.2.3.7',
                                         'weight': 1,
-                                        'status': 'down',
+                                        'status': 'obey',
                                     },
                                 ],
                             },
                             'two': {
                                 'values': [
-                                    {'value': '1.2.3.4', 'weight': 1},
+                                    {
+                                        'value': '1.2.3.4',
+                                        'weight': 1,
+                                        'status': 'up',
+                                    },
                                     {
                                         'value': '1.2.3.5',
                                         'weight': 1,
-                                        'status': 'up',
+                                        'status': 'obey',
                                     },
                                 ]
                             },
@@ -1762,6 +2037,16 @@ class TestConstellixProvider(TestCase):
                 text='{"id": 1234, "name": "unit.tests", "hasGeoIP": true}',
             )
             mock.delete(ANY, status_code=200, text='{}')
+            mock.get(
+                'https://api.sonar.constellix.com/rest/api/system/sites',
+                status_code=200,
+                text='{}',
+            )
+            mock.get(
+                'https://api.sonar.constellix.com/rest/api/http',
+                status_code=200,
+                text='{}',
+            )
             mock.put(
                 'https://api.dns.constellix.com/v1/pools/A/1808521',
                 status_code=400,
@@ -1782,7 +2067,24 @@ class TestConstellixProvider(TestCase):
                 status_code=400,
                 text='{"errors": [\"no changes to save\"]}',
             )
-            mock.post(ANY, status_code=200, text='[{"id": 1234}]')
+            mock.post(
+                'https://api.sonar.constellix.com/rest/api/http',
+                status_code=200,
+                text='{}',
+                headers={
+                    'Location': 'https://api.sonar.constellix.com/rest/api/http/5678'
+                },
+            )
+            mock.get(
+                'https://api.sonar.constellix.com/rest/api/http/5678',
+                status_code=200,
+                text='{"id":5678,"name":"www.dynamic:A:one-1.2.3.7"}',
+            )
+            mock.post(
+                'https://api.dns.constellix.com/v1/domains/1234/records/A',
+                status_code=200,
+                text='[{"id": 9876}]',
+            )
 
             plan = provider.plan(wanted)
             self.assertEqual(1, len(plan.changes))
@@ -1860,6 +2162,11 @@ class TestConstellixProvider(TestCase):
                 text='{"id": 1234, "name": "unit.tests", "hasGeoIP": true}',
             )
             mock.delete(ANY, status_code=200, text='{}')
+            mock.get(
+                'https://api.sonar.constellix.com/rest/api/system/sites',
+                status_code=200,
+                text='[]',
+            )
             mock.put(
                 'https://api.dns.constellix.com/v1/pools/A/1808521',
                 status_code=400,
@@ -1875,7 +2182,22 @@ class TestConstellixProvider(TestCase):
                 status_code=400,
                 text='{"errors": [\"generic error\"]}',
             )
-            mock.post(ANY, status_code=200, text='[{"id": 1234}]')
+            mock.post(
+                'https://api.sonar.constellix.com/rest/api/http',
+                status_code=200,
+                headers={'Location': '5678'},
+                text='{}',
+            )
+            mock.get(
+                'https://api.sonar.constellix.com/rest/api/http/5678',
+                status_code=200,
+                text='{"id":5678,"name":"www.dynamic:A:one-1.2.3.7"}',
+            )
+            mock.post(
+                'https://api.dns.constellix.com/v1/domains/1234/records/A',
+                status_code=200,
+                text='[{"id": 9876}]',
+            )
 
             plan = provider.plan(wanted)
             self.assertEqual(1, len(plan.changes))
@@ -1895,6 +2217,11 @@ class TestConstellixProvider(TestCase):
                 text='{"id": 1234, "name": "unit.tests", "hasGeoIP": true}',
             )
             mock.delete(ANY, status_code=200, text='{}')
+            mock.get(
+                'https://api.sonar.constellix.com/rest/api/system/sites',
+                status_code=200,
+                text='{}',
+            )
             mock.put(
                 'https://api.dns.constellix.com/v1/pools/A/1808521',
                 status_code=400,
@@ -1910,48 +2237,54 @@ class TestConstellixProvider(TestCase):
                 status_code=400,
                 text='{"errors": [\"generic error\"]}',
             )
-            mock.post(ANY, status_code=200, text='[{"id": 1234}]')
+            mock.post(
+                'https://api.sonar.constellix.com/rest/api/http',
+                status_code=200,
+                headers={'Location': '5678'},
+                text='{}',
+            )
+            mock.get(
+                'https://api.sonar.constellix.com/rest/api/http/5678',
+                status_code=200,
+                text='{"id":5678,"name":"www.dynamic:A:one-1.2.3.7"}',
+            )
+            mock.post(
+                'https://api.dns.constellix.com/v1/domains/1234/records/A',
+                status_code=200,
+                text='[{"id": 9876}]',
+            )
 
             plan = provider.plan(wanted)
             self.assertEqual(1, len(plan.changes))
             with self.assertRaises(ConstellixClientBadRequest):
                 provider.apply(plan)
+            # self.fail()
 
     def test_pools_that_are_notfound(self):
         provider = ConstellixProvider('test', 'api', 'secret')
 
-        provider._client.pools = Mock(
-            return_value=[
-                {
-                    'id': 1808521,
-                    'name': 'unit.tests.:www.dynamic:A:two',
-                    'type': 'A',
-                    'values': [{'value': '1.2.3.4', 'weight': 1}],
-                }
-            ]
-        )
+        with open(
+            'tests/fixtures/constellix-pools-A-two-simple-full-cache.json'
+        ) as fh:
+            provider._client.pools = Mock(return_value=json.load(fh))
 
         self.assertIsNone(provider._client.pool_by_id('A', 1))
-        self.assertIsNone(provider._client.pool('A', 'foobar'))
+        self.assertIsNone(provider._client.pool_by_name('A', 'foobar'))
 
     def test_pools_are_cached_correctly(self):
         provider = ConstellixProvider('test', 'api', 'secret')
 
-        provider._client.pools = Mock(
-            return_value=[
-                {
-                    'id': 1808521,
-                    'name': 'unit.tests.:www.dynamic:A:two',
-                    'type': 'A',
-                    'values': [{'value': '1.2.3.4', 'weight': 1}],
-                }
-            ]
-        )
+        with open(
+            'tests/fixtures/constellix-pools-A-two-simple-full-cache.json'
+        ) as fh:
+            provider._client.pools = Mock(return_value=json.load(fh))
 
-        found = provider._client.pool('A', 'unit.tests.:www.dynamic:A:two')
+        found = provider._client.pool_by_name(
+            'A', 'unit.tests.:www.dynamic:A:two'
+        )
         self.assertIsNotNone(found)
 
-        not_found = provider._client.pool(
+        not_found = provider._client.pool_by_name(
             'AAAA', 'unit.tests.:www.dynamic:A:two'
         )
         self.assertIsNone(not_found)
@@ -1962,21 +2295,37 @@ class TestConstellixProvider(TestCase):
                     'id': 42,
                     'name': 'unit.tests.:www.dynamic:A:two',
                     'type': 'A',
-                    'values': [{'value': '1.2.3.4', 'weight': 1}],
+                    'values': [
+                        {
+                            'value': '1.2.3.4',
+                            'weight': 1,
+                            'policy': 'followsonar',
+                        }
+                    ],
+                    'failedFlag': False,
                 },
                 {
                     'id': 451,
                     'name': 'unit.tests.:www.dynamic:A:two',
                     'type': 'AAAA',
-                    'values': [{'value': '1.2.3.4', 'weight': 1}],
+                    'values': [
+                        {
+                            'value': '1.2.3.4',
+                            'weight': 1,
+                            'policy': 'followsonar',
+                        }
+                    ],
+                    'failedFlag': False,
                 },
             ]
         )
 
-        a_pool = provider._client.pool('A', 'unit.tests.:www.dynamic:A:two')
+        a_pool = provider._client.pool_by_name(
+            'A', 'unit.tests.:www.dynamic:A:two'
+        )
         self.assertEqual(42, a_pool['id'])
 
-        aaaa_pool = provider._client.pool(
+        aaaa_pool = provider._client.pool_by_name(
             'AAAA', 'unit.tests.:www.dynamic:A:two'
         )
         self.assertEqual(451, aaaa_pool['id'])
@@ -2026,7 +2375,12 @@ class TestConstellixProvider(TestCase):
                     mock.get(f'{base}/domains/123123/records', text=fh.read())
                 with open('tests/fixtures/constellix-geofilters.json') as fh:
                     mock.get(f'{base}/geoFilters', text=fh.read())
-                mock.get(f'{base}/pools/A', text='')
+                with open('tests/fixtures/constellix-pools-A.json') as fh:
+                    mock.get(f'{base}/pools/A', text=fh.read())
+                with open('tests/fixtures/constellix-pool-A-two.json') as fh:
+                    mock.get(f'{base}/pools/A/1808521', text='')
+                with open('tests/fixtures/constellix-pool-A-one.json') as fh:
+                    mock.get(f'{base}/pools/A/1808522', text='')
                 with open('tests/fixtures/constellix-geofilters.json') as fh:
                     mock.get(f'{base}/geoFilters', text=fh.read())
 
@@ -2063,6 +2417,10 @@ class TestConstellixProvider(TestCase):
                 with open('tests/fixtures/constellix-geofilters.json') as fh:
                     mock.get(f'{base}/geoFilters', text=fh.read())
                 mock.get(f'{base}/pools/A', text='')
+                with open('tests/fixtures/constellix-pool-A-two.json') as fh:
+                    mock.get(f'{base}/pools/A/1808521', text=fh.read())
+                with open('tests/fixtures/constellix-pool-A-one.json') as fh:
+                    mock.get(f'{base}/pools/A/1808522', text=fh.read())
                 with open('tests/fixtures/constellix-geofilters.json') as fh:
                     mock.get(f'{base}/geoFilters', text=fh.read())
 
@@ -2088,6 +2446,10 @@ class TestConstellixProvider(TestCase):
                 ) as fh:
                     mock.get(f'{base}/domains/123123/records', text=fh.read())
                 mock.get(f'{base}/pools/A', text='')
+                with open('tests/fixtures/constellix-pool-A-two.json') as fh:
+                    mock.get(f'{base}/pools/A/1808521', text=fh.read())
+                with open('tests/fixtures/constellix-pool-A-one.json') as fh:
+                    mock.get(f'{base}/pools/A/1808522', text=fh.read())
                 mock.get(f'{base}/geoFilters', text='')
 
                 provider.populate(zone)
@@ -2104,6 +2466,26 @@ class TestConstellixProvider(TestCase):
 
 
 class TestConstellixClient(TestCase):
+    def test_default_geofilter(self):
+        log = logging.getLogger('client')
+        client = ConstellixClient(log, 'test', 'api', 'secret')
+
+        resp = Mock()
+        resp.json = Mock()
+        client._request = Mock(return_value=resp)
+        resp_side_effect = [
+            [
+                {
+                    'id': 1,
+                    'name': 'World (Default)',
+                    'geoipContinents': ['default'],
+                }
+            ]
+        ]
+        resp.json.side_effect = resp_side_effect
+
+        self.assertIsNotNone(client.geofilter_by_id(1))
+
     def test_unknown_geofilter(self):
         log = logging.getLogger('client')
         client = ConstellixClient(log, 'test', 'api', 'secret')
@@ -2111,7 +2493,45 @@ class TestConstellixClient(TestCase):
         resp = Mock()
         resp.json = Mock()
         client._request = Mock(return_value=resp)
-        resp_side_effect = [[]]  # GET /geoFilters
+        resp_side_effect = [
+            [
+                {
+                    'id': 1,
+                    'name': 'World (Default)',
+                    'geoipContinents': ['default'],
+                }
+            ]
+        ]
         resp.json.side_effect = resp_side_effect
 
         self.assertIsNone(client.geofilter_by_id(9999999))
+
+    def test_pool_create_multiple(self):
+        log = logging.getLogger('client')
+        client = ConstellixClient(log, 'test', 'api', 'secret')
+
+        resp = Mock()
+        resp.json = Mock()
+        client._request = Mock(return_value=resp)
+        resp_side_effect = [[{'id': 1}, {'id': 2}]]  # POST /pools/A
+        resp.json.side_effect = resp_side_effect
+
+        data = {'type': 'A'}
+
+        self.assertRaises(ConstellixClientException, client.pool_create, data)
+
+    def test_pool_update_no_success(self):
+        log = logging.getLogger('client')
+        client = ConstellixClient(log, 'test', 'api', 'secret')
+
+        resp = Mock()
+        resp.json = Mock()
+        client._request = Mock(return_value=resp)
+        resp_side_effect = [{'error': 'unexpected'}]  # PUT /pools/A/1
+        resp.json.side_effect = resp_side_effect
+
+        data = {'name': 'foo'}
+
+        self.assertRaises(
+            ConstellixClientException, client.pool_update, 'A', 1, data
+        )

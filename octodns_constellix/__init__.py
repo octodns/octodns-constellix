@@ -4,6 +4,7 @@
 
 import hashlib
 import hmac
+import json
 import logging
 import time
 from base64 import b64encode, standard_b64encode
@@ -96,6 +97,7 @@ class ConstellixClient(object):
     @property
     def domains(self):
         if self._domains is None:
+            self.log.debug('fetch domains')
             zones = []
 
             resp = self._request('GET', '/domains').json()
@@ -106,6 +108,7 @@ class ConstellixClient(object):
         return self._domains
 
     def domain(self, name):
+        self.log.debug('domain %s', name)
         zone_id = self.domains.get(name, False)
         if not zone_id:
             raise ConstellixClientNotFound()
@@ -113,6 +116,7 @@ class ConstellixClient(object):
         return self._request('GET', path).json()
 
     def domain_create(self, name):
+        self.log.debug('domain_create %s', name)
         resp = self._request('POST', '/domains', data={'names': [name]}).json()
         # Add newly created zone to domain cache
         self._domains[f'{name}.'] = resp[0]['id']
@@ -178,59 +182,112 @@ class ConstellixClient(object):
         path = f'/domains/{zone_id}/records/{record_type}/{record_id}'
         return self._request('DELETE', path).json()
 
-    def pools(self, pool_type):
-        if self._pools[pool_type] is None:
+    def pool_update_cache(self, pool_type, pool_id, value):
+        # Create cache for pool_type if needed
+        if value is not None and self._pools[pool_type] is None:
             self._pools[pool_type] = {}
+
+        if self._pools[pool_type] is not None:
+            self._pools[pool_type][pool_id] = value
+
+    def pool_clear_cache(self, pool_type, pool_id):
+        self.log.debug('pool_clear_cache %s %d', pool_type, pool_id)
+        self.pool_update_cache(pool_type, pool_id, None)
+
+    def pool_get_cache(self, pool_type):
+        if self._pools[pool_type] is None:
+            return []
+        else:
+            return self._pools[pool_type].values()
+
+    def pools(self, pool_type):
+        self.log.debug('pools %s', pool_type)
+        # The list view does not return checkId, policy and other details
+        result = self.pool_get_cache(pool_type)
+        if 0 == len(self.pool_get_cache(pool_type)):
             path = f'/pools/{pool_type}'
             response = self._request('GET', path).json()
             for pool in response:
-                self._pools[pool_type][pool['id']] = pool
-        return self._pools[pool_type].values()
+                self.pool_update_cache(pool_type, pool['id'], pool)
+            result = self.pool_get_cache(pool_type)
+        return result
 
-    def pool(self, pool_type, pool_name):
+    def pool_by_id(self, pool_type, pool_id):
+        self.log.debug('pool_by_id %s %d', pool_type, pool_id)
+        pools = self.pools(pool_type)
+        result = None
+        for pool in pools:
+            if pool['id'] == pool_id:
+                result = pool
+                break
+
+        # We do not have the details yet, fetch the pool.
+        # Do not try to fetch details for something that is not in the list.
+        if result is not None and result.get('failedFlag', None) is None:
+            path = f'/pools/{pool_type}/{pool_id}'
+            result = self._request('GET', path).json()
+            self._pools[pool_type][pool['id']] = result
+
+        return result
+
+    def pool_by_name(self, pool_type, pool_name):
+        self.log.debug('pool_by_name %s %s', pool_type, pool_name)
         pools = self.pools(pool_type)
         for pool in pools:
             if pool['name'] == pool_name and pool['type'] == pool_type:
-                return pool
-        return None
-
-    def pool_by_id(self, pool_type, pool_id):
-        pools = self.pools(pool_type)
-        for pool in pools:
-            if pool['id'] == pool_id:
-                return pool
+                return self.pool_by_id(pool_type, pool['id'])
         return None
 
     def pool_create(self, data):
-        path = f'/pools/{data.get("type")}'
-        # This returns a list of items, we want the first one
+        self.log.debug('pool_create %s', json.dumps(data))
+        pool_type = data.get('type')
+        path = f'/pools/{pool_type}'
+
+        # This returns a list of items, we want the first (and single) one
         response = self._request('POST', path, data=data).json()
 
-        # Update our cache
-        self._pools[data.get('type')][response[0]['id']] = response[0]
-        return response[0]
+        # Unexpected response that does not contain exactly one entry
+        if 1 != len(response):
+            raise ConstellixClientException(response)
 
-    def pool_update(self, pool_id, data):
-        path = f'/pools/{data.get("type")}/{pool_id}'
+        response = response[0]
+
+        # Update our cache
+        self.pool_update_cache(pool_type, response['id'], response)
+        return response
+
+    def pool_update(self, pool_type, pool_id, data):
+        self.log.debug('pool_update %s', json.dumps(data))
+        # Note that PUT does not return the new value, but only a success string
+        path = f'/pools/{pool_type}/{pool_id}'
+
         try:
-            data = self._request('PUT', path, data=data).json()
+            # This may throw a ConstellixClientBadRequest or return a status
+            response = self._request('PUT', path, data=data).json()
+            # Status does not contain success message
+            if not response.get('success', False):
+                raise ConstellixClientException(response)
+            # We had a real change - clear the cache
+            self.pool_clear_cache(pool_type, pool_id)
 
         except ConstellixClientBadRequest as e:
+            # This is either due to a NOOP or to a real failure
             message = str(e)
             if not message or (
                 "no changes to save" not in message
                 and "are identical" not in message
             ):
                 raise e
-        return data
+
+        return self.pool_by_id(pool_type, pool_id)
 
     def pool_delete(self, pool_type, pool_id):
         path = f'/pools/{pool_type}/{pool_id}'
         resp = self._request('DELETE', path).json()
 
-        # Update our cache
-        if self._pools[pool_type] is not None:
-            self._pools[pool_type].pop(pool_id, None)
+        # Clear the cache entry
+        self.pool_clear_cache(pool_type, pool_id)
+
         return resp
 
     def geofilters(self):
@@ -363,14 +420,16 @@ class SonarClient(object):
             self.log.debug("Waiting for Sonar Rate Limit Delay")
         time.sleep(self.ratelimit_delay)
 
-        return resp
+        return resp.json(), resp.headers
 
     @property
     def agents(self):
         if self._agents is None:
+            self.log.debug('sonar.agents fetch')
             agents = []
 
-            data = self._request('GET', '/system/sites').json()
+            data, headers = self._request('GET', '/system/sites')
+            self.log.debug('sonar.agents data %s', type(data))
             agents += data
 
             self._agents = {f'{a["name"]}.': a for a in agents}
@@ -396,15 +455,21 @@ class SonarClient(object):
         return res
 
     def checks(self, check_type):
+        self.log.debug('sonar.checks %s', check_type)
         if self._checks[check_type] is None:
+            self.log.debug('sonar.checks %s fetch', check_type)
             self._checks[check_type] = {}
             path = f'/{check_type}'
-            data = self._request('GET', path).json()
+            data, headers = self._request('GET', path)
+            self.log.debug(
+                'sonar.checks %s data %s', check_type, json.dumps(data)
+            )
             for check in data:
                 self._checks[check_type][check['id']] = check
         return self._checks[check_type].values()
 
     def check(self, check_type, check_name):
+        self.log.debug('sonar.check %s %s', check_type, check_name)
         checks = self.checks(check_type)
         for check in checks:
             if check['name'] == check_name:
@@ -412,23 +477,27 @@ class SonarClient(object):
         return None
 
     def check_create(self, check_type, data):
+        self.log.debug('sonar.check_create %s %s', check_type, json.dumps(data))
         path = f'/{check_type}'
-        response = self._request('POST', path, data=data)
+        data, headers = self._request('POST', path, data=data)
+        self.log.debug(
+            'check_create response %s headers %s',
+            json.dumps(data),
+            json.dumps(dict(headers)),
+        )
+
         # Parse check ID from Location response header
-        id = self.parse_uri_id(response.headers["Location"])
+        check_id = self.parse_uri_id(headers['Location'])
         # Get check details
-        path = f'/{check_type}/{id}'
-        data = self._request('GET', path, data=data).json()
+        path = f'/{check_type}/{check_id}'
+        data, headers = self._request('GET', path)
 
         # Update our cache
-        self._checks[check_type]['id'] = data
+        self._checks[check_type][check_id] = data
         return data
 
-    def check_delete(self, check_id):
-        # first get check type
-        path = f'/check/type/{check_id}'
-        data = self._request('GET', path).json()
-        check_type = data['type'].lower()
+    def check_delete(self, check_type, check_id):
+        self.log.debug('sonar.check_delete %s %d', check_type, check_id)
 
         path = f'/{check_type}/{check_id}'
         self._request('DELETE', path)
@@ -454,6 +523,7 @@ class ConstellixProvider(BaseProvider):
 
     SUPPORTS_GEO = False
     SUPPORTS_DYNAMIC = True
+    SUPPORTS_POOL_VALUE_STATUS = True
     SUPPORTS_ROOT_NS = False
     SUPPORTS = set(
         (
@@ -470,6 +540,17 @@ class ConstellixProvider(BaseProvider):
             'TXT',
         )
     )
+
+    _POOL_STATUS_TO_POLICY = {
+        'down': 'alwaysoff',
+        'obey': 'followsonar',
+        'up': 'alwayson',
+    }
+    _POOL_POLICY_TO_STATUS = {
+        'alwaysoff': 'down',
+        'alwayson': 'up',
+        'followsonar': 'obey',
+    }
 
     def __init__(
         self, id, api_key, secret_key, ratelimit_delay=0.0, *args, **kwargs
@@ -516,13 +597,18 @@ class ConstellixProvider(BaseProvider):
     def _data_for_pool(self, _type, record, pools):
         pool_id = record['pools'][0]
         pool = self._client.pool_by_id(_type, pool_id)
-
         pool_name = pool['name'].split(':')[-1]
 
         pool_data = {'fallback': None, 'values': []}
         for value in pool['values']:
             pool_data['values'].append(
-                {'value': value['value'], 'weight': value['weight']}
+                {
+                    'value': value['value'],
+                    'weight': value['weight'],
+                    'status': self._POOL_POLICY_TO_STATUS[
+                        value.get('policy', 'obey')
+                    ],
+                }
             )
         pools[pool_name] = pool_data
         return pool_name
@@ -746,28 +832,32 @@ class ConstellixProvider(BaseProvider):
         )
         return exists
 
-    def _is_healthcheck_configured(self, record):
-        sonar_healthcheck = record._octodns.get('constellix', {}).get(
-            'healthcheck', None
-        )
-        return sonar_healthcheck is not None
-
     def _healthcheck_config(self, record):
+        self.log.debug('_healthcheck_config %s', json.dumps(record.data))
+        # Backwards compatibility: fetch healthcheck config
+        # from octodns.constellix with preference
         sonar_healthcheck = record._octodns.get('constellix', {}).get(
-            'healthcheck', None
+            'healthcheck', {}
         )
 
-        if sonar_healthcheck is None:
-            return None
+        # Use values from constellix.healthcheck (new default) as a fallback
+        healthcheck = {
+            'port': sonar_healthcheck.get(
+                'sonar_port', record.healthcheck_port
+            ),
+            'type': sonar_healthcheck.get(
+                'sonar_type', record.healthcheck_protocol
+            ),
+        }
+        if 'TCP' != healthcheck['type']:
+            healthcheck['host'] = record.healthcheck_host
+            healthcheck['path'] = record.healthcheck_path
 
-        healthcheck = {}
-        healthcheck["sonar_port"] = sonar_healthcheck.get('sonar_port', 80)
-        healthcheck["sonar_type"] = sonar_healthcheck.get('sonar_type', "TCP")
-        healthcheck["sonar_regions"] = sonar_healthcheck.get(
-            'sonar_regions', ["WORLD"]
+        healthcheck['regions'] = sonar_healthcheck.get(
+            'sonar_regions', ['WORLD']
         )
-        healthcheck["sonar_interval"] = sonar_healthcheck.get(
-            'sonar_interval', "ONEMINUTE"
+        healthcheck['interval'] = sonar_healthcheck.get(
+            'sonar_interval', 'ONEMINUTE'
         )
 
         return healthcheck
@@ -850,7 +940,13 @@ class ConstellixProvider(BaseProvider):
         pool_data = {}
         for pool_name, pool in record.dynamic.pools.items():
             values = [
-                {'value': value['value'], 'weight': value['weight']}
+                {
+                    'value': value['value'],
+                    'weight': value['weight'],
+                    'policy': self._POOL_STATUS_TO_POLICY.get(
+                        value['status'], 'obey'
+                    ),
+                }
                 for value in pool.data.get('values', [])
             ]
             full_pool_name = self._gen_pool_name(record, pool_name)
@@ -862,32 +958,48 @@ class ConstellixProvider(BaseProvider):
         return pool_data
 
     def _create_update_dynamic_healthchecks(self, record, pool_data):
-        healthcheck = self._healthcheck_config(record)
-        if healthcheck is None:
-            return pool_data, None
-
-        check_sites = self._sonar.agents_for_regions(
-            healthcheck['sonar_regions']
+        self.log.debug(
+            '_create_update_dynamic_healthchecks %s %s',
+            json.dumps(record.data),
+            json.dumps(pool_data),
         )
+        healthcheck = self._healthcheck_config(record)
+        check_sites = self._sonar.agents_for_regions(healthcheck['regions'])
+
         health_data = {}
         for pool_name, pool in pool_data.items():
             for value in pool['values']:
+                self.log.debug('pool %s %s', pool_name, json.dumps(value))
+                policy = value.get('policy', 'followsonar')
+
+                check_type = healthcheck['type'].lower()
                 check_name = '{}-{}'.format(pool_name, value['value'])
-                check_obj = self._create_update_check(
-                    pool_type=record._type,
-                    check_name=check_name,
-                    check_type=healthcheck['sonar_type'].lower(),
-                    value=value['value'],
-                    port=healthcheck['sonar_port'],
-                    interval=healthcheck['sonar_interval'],
-                    sites=check_sites,
+                self.log.debug(
+                    'update policy %s %s %s', policy, check_type, check_name
                 )
-                value['checkId'] = check_obj['id']
-                value['policy'] = 'followsonar'
-                health_data[check_name] = check_obj
+                if policy == 'followsonar':
+                    check_obj = self._create_update_check(
+                        pool_type=record._type,
+                        check_name=check_name,
+                        check_type=check_type,
+                        value=value['value'],
+                        port=healthcheck['port'],
+                        interval=healthcheck['interval'],
+                        sites=check_sites,
+                    )
+                    value['checkId'] = check_obj['id']
+                    health_data[check_name] = check_obj
+                else:
+                    self._delete_check(check_type, check_name)
+
         return pool_data, health_data
 
     def _create_update_dynamic_pools(self, pool_data, health_data):
+        self.log.debug(
+            '_create_update_dynamic_pools %s %s',
+            json.dumps(pool_data),
+            json.dumps(health_data),
+        )
         pools = {}
         # TODO: use batch operation here
         for pool_name, pool in pool_data.items():
@@ -950,9 +1062,18 @@ class ConstellixProvider(BaseProvider):
         # return created or updated pool objects
         return rules, pools
 
+    def _delete_check(self, check_type, check_name):
+        self.log.debug('_delete_check %s %s', check_type, check_name)
+        if check_type == 'https':
+            check_type = 'http'
+        existing_check = self._sonar.check(check_type, check_name)
+        if existing_check:
+            self._sonar.check_delete(check_type, existing_check['id'])
+
     def _create_update_check(
         self, pool_type, check_name, check_type, value, port, interval, sites
     ):
+        self.log.debug('_create_update_check %s', check_name)
         check = {
             'name': check_name,
             'host': value,
@@ -960,21 +1081,28 @@ class ConstellixProvider(BaseProvider):
             'checkSites': sites,
             'interval': interval,
         }
-        if pool_type == "AAAA":
-            check['ipVersion'] = "IPV6"
+        if pool_type == 'AAAA':
+            check['ipVersion'] = 'IPV6'
         else:
-            check['ipVersion'] = "IPV4"
+            check['ipVersion'] = 'IPV4'
 
-        if check_type == "http":
-            check['protocolType'] = "HTTPS"
+        if check_type == 'https':
+            check['protocolType'] = 'HTTPS'
+            check_type = (
+                'http'  # SonarClient and constellix API only know http type
+            )
 
+        # FIXME: do not delete then create, but update
         existing_check = self._sonar.check(check_type, check_name)
         if existing_check:
-            self._sonar.check_delete(existing_check['id'])
+            self._delete_check(check_type, check_name)
 
         return self._sonar.check_create(check_type, check)
 
     def _create_update_pool(self, pool_name, pool_type, values):
+        self.log.debug(
+            '_create_update_pool %s %s %s', pool_type, pool_name, values
+        )
         pool = {
             'name': pool_name,
             'type': pool_type,
@@ -982,14 +1110,13 @@ class ConstellixProvider(BaseProvider):
             'minAvailableFailover': 1,
             'values': values,
         }
-        existing_pool = self._client.pool(pool_type, pool_name)
-        if not existing_pool:
+        existing_pool = self._client.pool_by_name(pool_type, pool_name)
+        if existing_pool:
+            return self._client.pool_update(
+                pool_type, existing_pool['id'], pool
+            )
+        else:
             return self._client.pool_create(pool)
-
-        pool_id = existing_pool['id']
-        updated_pool = self._client.pool_update(pool_id, pool)
-        updated_pool['id'] = pool_id
-        return updated_pool
 
     def _create_update_geofilter(
         self, geofilter_name, continents, countries, regions
@@ -1126,27 +1253,32 @@ class ConstellixProvider(BaseProvider):
             if not getattr(record, 'dynamic', False):
                 continue
 
-            if not self._is_healthcheck_configured(record):
-                incompatible_pools = []
-                for name, pool in record.dynamic.pools.items():
-                    if pool.data['fallback'] is not None:
+            incompatible_pools = []
+            for name, pool in record.dynamic.pools.items():
+                if pool.data['fallback'] is not None:
+                    incompatible = True
+                    for value in pool.data['values']:
+                        if 'obey' == value.get('status', 'obey'):
+                            incompatible = False
+                            break
+                    if incompatible:
                         incompatible_pools.append(name)
 
-                if not incompatible_pools:
-                    continue
+            if not incompatible_pools:
+                continue
 
-                incompatible_pools = ','.join(incompatible_pools)
-                msg = (
-                    f'fallback without monitor for pools '
-                    f'{incompatible_pools} in {record.fqdn}'
-                )
-                fallback = 'will ignore it'
-                self.supports_warn_or_except(msg, fallback)
+            incompatible_pools = ','.join(incompatible_pools)
+            msg = (
+                f'fallback without monitor for pools '
+                f'{incompatible_pools} in {record.fqdn}'
+            )
+            fallback = 'will ignore it'
+            self.supports_warn_or_except(msg, fallback)
 
-                record = record.copy()
-                for pool in record.dynamic.pools.values():
-                    pool.data['fallback'] = None
-                desired.add_record(record, replace=True)
+            record = record.copy()
+            for pool in record.dynamic.pools.values():
+                pool.data['fallback'] = None
+            desired.add_record(record, replace=True)
 
         return super()._process_desired_zone(desired)
 
