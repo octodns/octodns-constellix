@@ -1647,8 +1647,14 @@ class TestConstellixProvider(TestCase):
                     'failedFlag': False,
                 }
             ],  # create pool - list
-            {},
-            {},
+            {
+                'success': 'IP Filter updated successfully.'
+            },  # update geofilter - only success message
+            {},  # PUT does not return value, refetch geofilter
+            {
+                'success': 'IP Filter updated successfully.'
+            },  # update geofilter - only success message
+            {},  # PUT does not return value, refetch geofilter
             {
                 'id': 123123,
                 'name': 'unit.tests',
@@ -1867,6 +1873,9 @@ class TestConstellixProvider(TestCase):
                     },
                 ),
                 call(
+                    'GET', '/geoFilters/5303'
+                ),  # PUT does not return the new value, refetch
+                call(
                     'PUT',
                     '/geoFilters/9303',
                     data={
@@ -1875,6 +1884,9 @@ class TestConstellixProvider(TestCase):
                         'geoipContinents': ['default'],
                     },
                 ),
+                call(
+                    'GET', '/geoFilters/9303'
+                ),  # PUT does not return the new value, refetch
                 call('GET', '/domains/123123'),
                 call(
                     'POST',
@@ -2198,6 +2210,11 @@ class TestConstellixProvider(TestCase):
                 status_code=400,
                 text='{"errors": [\"generic error\"]}',
             )
+            mock.put(
+                'https://api.dns.constellix.com/v1/geoFilters/5303',
+                status_code=200,
+                text='{"nosuccess": [\"something weird - 200 but no success msg\"]}',
+            )
             mock.post(
                 'https://api.sonar.constellix.com/rest/api/http',
                 status_code=200,
@@ -2252,6 +2269,11 @@ class TestConstellixProvider(TestCase):
                 'https://api.dns.constellix.com/v1/geoFilters/5303',
                 status_code=400,
                 text='{"errors": [\"generic error\"]}',
+            )
+            mock.put(
+                'https://api.dns.constellix.com/v1/geoFilters/5303',
+                status_code=200,
+                text='{"nosuccess": [\"something weird - 200 but no success msg\"]}',
             )
             mock.post(
                 'https://api.sonar.constellix.com/rest/api/http',
@@ -2549,5 +2571,5 @@ class TestConstellixClient(TestCase):
         data = {'name': 'foo'}
 
         self.assertRaises(
-            ConstellixClientException, client.pool_update, 'A', 1, data
+            ConstellixClientBadRequest, client.pool_update, 'A', 1, data
         )

@@ -27,8 +27,8 @@ class ConstellixClientException(ProviderException):
 
 
 class ConstellixClientBadRequest(ConstellixClientException):
-    def __init__(self, resp):
-        errors = '\n  - '.join(resp.json()['errors'])
+    def __init__(self, data):
+        errors = '\n  - '.join(data.get('errors', []))
         super().__init__(f'\n  - {errors}')
 
 
@@ -86,7 +86,7 @@ class ConstellixClient(object):
             method, url, headers=headers, params=params, json=data
         )
         if resp.status_code == 400:
-            raise ConstellixClientBadRequest(resp)
+            raise ConstellixClientBadRequest(resp.json())
         if resp.status_code == 401:
             raise ConstellixClientUnauthorized()
         if resp.status_code == 404:
@@ -264,10 +264,13 @@ class ConstellixClient(object):
 
         try:
             # This may throw a ConstellixClientBadRequest or return a status
-            response = self._request('PUT', path, data=data).json()
+            response = self._request('PUT', path, data=data)
+            data = response.json()
+
             # Status does not contain success message
-            if not response.get('success', False):
-                raise ConstellixClientException(response)
+            if not data.get('success', False):
+                raise ConstellixClientBadRequest(data)
+
             # We had a real change - clear the cache
             self.pool_clear_cache(pool_type, pool_id)
 
@@ -323,9 +326,25 @@ class ConstellixClient(object):
         return response[0]
 
     def geofilter_update(self, geofilter_id, data):
+        self.log.debug('geofilter_update %d %s', geofilter_id, json.dumps(data))
+        # Note that PUT does not return the new value, but only a success string
         path = f'/geoFilters/{geofilter_id}'
         try:
-            data = self._request('PUT', path, data=data).json()
+            # This may throw a ConstellixClientBadRequest or return a status
+            response = self._request('PUT', path, data=data)
+            data = response.json()
+
+            # Status does not contain success message
+            if not data.get('success', False):
+                raise ConstellixClientBadRequest(data)
+
+            # We had a real change - clear the cache
+            self._geofilters.pop(geofilter_id, None)
+
+            # Update the record information
+            path = f'/geoFilters/{geofilter_id}'
+            data = self._request('GET', path).json()
+            self._geofilters[geofilter_id] = data
 
         except ConstellixClientBadRequest as e:
             message = str(e)
@@ -334,7 +353,8 @@ class ConstellixClient(object):
                 and "are identical" not in message
             ):
                 raise e
-        return data
+
+        return self.geofilter_by_id(geofilter_id)
 
     def geofilter_delete(self, geofilter_id):
         path = f'/geoFilters/{geofilter_id}'
