@@ -420,7 +420,7 @@ class SonarClient(object):
             self.log.debug("Waiting for Sonar Rate Limit Delay")
         time.sleep(self.ratelimit_delay)
 
-        return resp.json(), resp.headers
+        return resp.json(), resp.headers, False
 
     @property
     def agents(self):
@@ -428,7 +428,7 @@ class SonarClient(object):
             self.log.debug('sonar.agents fetch')
             agents = []
 
-            data, headers = self._request('GET', '/system/sites')
+            data, headers, cached = self._request('GET', '/system/sites')
             self.log.debug('sonar.agents data %s', type(data))
             agents += data
 
@@ -460,7 +460,7 @@ class SonarClient(object):
             self.log.debug('sonar.checks %s fetch', check_type)
             self._checks[check_type] = {}
             path = f'/{check_type}'
-            data, headers = self._request('GET', path)
+            data, headers, cached = self._request('GET', path)
             self.log.debug(
                 'sonar.checks %s data %s', check_type, json.dumps(data)
             )
@@ -479,7 +479,7 @@ class SonarClient(object):
     def check_create(self, check_type, data):
         self.log.debug('sonar.check_create %s %s', check_type, json.dumps(data))
         path = f'/{check_type}'
-        data, headers = self._request('POST', path, data=data)
+        data, headers, cached = self._request('POST', path, data=data)
         self.log.debug(
             'check_create response %s headers %s',
             json.dumps(data),
@@ -490,7 +490,7 @@ class SonarClient(object):
         check_id = self.parse_uri_id(headers['Location'])
         # Get check details
         path = f'/{check_type}/{check_id}'
-        data, headers = self._request('GET', path)
+        data, headers, cached = self._request('GET', path)
 
         # Update our cache
         self._checks[check_type][check_id] = data

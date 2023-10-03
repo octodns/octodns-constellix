@@ -841,10 +841,12 @@ class TestConstellixProvider(TestCase):
                     },
                 ],
                 {},
+                False,
             ),  # available agents
             (
                 [{'id': 52, 'name': 'unit.tests.:www.dynamic:A:two-1.2.3.4'}],
                 {},
+                False,
             ),  # initial checks
             ({}, {}),  # DELETE .../tcp/52
             (
@@ -852,20 +854,24 @@ class TestConstellixProvider(TestCase):
                 {
                     'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52906'
                 },
+                False,
             ),  # POST .../tcp
             (
                 {'id': 52906, 'name': 'unit.tests.:www.dynamic:A:two-1.2.3.4'},
                 {},
+                False,
             ),  # check_create GET data
             (
                 {},
                 {
                     'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52907'
                 },
+                False,
             ),  # POST .../tcp
             (
                 {'id': 52907, 'name': 'unit.tests.:www.dynamic:A:two-1.2.3.5'},
                 {},
+                False,
             ),  # check_create GET data
         ]
         provider._sonar._request.side_effect = sonar_resp_side_effect
@@ -1100,22 +1106,25 @@ class TestConstellixProvider(TestCase):
                     },
                 ],
                 {},
+                False,
             ),  # available agents
-            ([], {}),  # no checks
+            ([], {}, False),  # no checks
             (
                 {},
                 {
                     'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52906'
                 },
+                False,
             ),
-            ({'id': 52906, 'name': 'check1'}, {}),
+            ({'id': 52906, 'name': 'check1'}, {}, False),
             (
                 {},
                 {
                     'Location': 'http://api.sonar.constellix.com/rest/api/tcp/52907'
                 },
+                False,
             ),
-            ({'id': 52907, 'name': 'check2'}, {}),
+            ({'id': 52907, 'name': 'check2'}, {}, False),
         ]
 
         plan = provider.plan(expected)
@@ -1333,47 +1342,56 @@ class TestConstellixProvider(TestCase):
                     },
                 ],
                 {},
+                False,
             ),  # GET .../sites
-            ({}, {}),  # GET .../http
+            ({}, {}, False),  # GET .../http
             (
                 {},
                 {
                     'Location': 'http://api.sonar.constellix.com/rest/api/http/5678'
                 },
+                False,
             ),  # POST .../http
             (
                 {'id': 5678, 'name': 'unit.tests.:www.dynamic:A:one-1.2.3.6'},
                 {},
+                False,
             ),  # GET .../http/5678
             (
                 {},
                 {
                     'Location': 'http://api.sonar.constellix.com/rest/api/http/5789'
                 },
+                False,
             ),  # POST .../http
             (
                 {'id': 5789, 'name': 'unit.tests.:www.dynamic:A:one-1.2.3.7'},
                 {},
+                False,
             ),  # GET .../http/5789
             (
                 {},
                 {
                     'Location': 'http://api.sonar.constellix.com/rest/api/http/6678'
                 },
+                False,
             ),  # POST .../http
             (
                 {'id': 6678, 'name': 'unit.tests.:www.dynamic:A:one-1.2.3.4'},
                 {},
+                False,
             ),  # GET .../http/6678
             (
                 {},
                 {
                     'Location': 'http://api.sonar.constellix.com/rest/api/http/6789'
                 },
+                False,
             ),  # POST .../http
             (
                 {'id': 6789, 'name': 'unit.tests.:www.dynamic:A:one-1.2.3.5'},
                 {},
+                False,
             ),  # GET .../http/6789
         ]
         provider._sonar._request.side_effect = sonar_resp_side_effect
@@ -1651,20 +1669,23 @@ class TestConstellixProvider(TestCase):
         client_resp.json.side_effect = client_resp_side_effect
 
         sonar_resp_side_effect = [
-            ({}, {}),  # DELETE .../http/5678
+            ({}, {}, False),  # DELETE .../http/5678
             (
                 {},
                 {'Location': 'http://api.sonar.constellix.com/rest/api/5678'},
+                False,
             ),  # POST .../http
             (
                 {'id': 5678, 'name': 'unit.tests.:www.dynamic:A:one-1.2.3.6'},
                 {},
+                False,
             ),  # GET .../http/5678
-            ({}, {}),  # DELETE .../http/5789
+            ({}, {}, False),  # DELETE .../http/5789
             # ({},{}),  # DELETE .../http/6789
             (
                 {},
                 {'Location': 'http://api.sonar.constellix.com/rest/api/9678'},
+                False,
             ),  # POST .../http
             (
                 {
@@ -1672,6 +1693,7 @@ class TestConstellixProvider(TestCase):
                     'name': 'unit.tests.:www.dynamic:A:fallback-9.9.9.9',
                 },
                 {},
+                False,
             ),  # GET .../http/9678
         ]
         provider._sonar._request.side_effect = sonar_resp_side_effect
