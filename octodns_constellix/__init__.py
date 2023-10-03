@@ -12,6 +12,7 @@ from collections import defaultdict
 
 from pycountry_convert import country_alpha2_to_continent_code
 from requests import Session
+from requests_cache import CachedSession
 
 from octodns import __VERSION__ as octodns_version
 from octodns.provider import ProviderException
@@ -373,12 +374,16 @@ class SonarClient(object):
         self.api_key = api_key
         self.secret_key = secret_key
         self.ratelimit_delay = ratelimit_delay
-        self._sess = Session()
+        self._sess = CachedSession(
+            backend='memory',
+            allowable_methods=['GET', 'HEAD'],
+            allowable_codes=[200],
+            ignored_parameters=['x-cns-security-token'],
+        )
         self._sess.headers = {
             'Content-Type': 'application/json',
             'User-Agent': f'octodns/{octodns_version} octodns-constellix/{__VERSION__}',
         }
-        self._agents = None
         self._checks = {'tcp': None, 'http': None}
 
     def _current_time_ms(self):
@@ -392,7 +397,11 @@ class SonarClient(object):
         hmac_text = str(standard_b64encode(signature), "UTF-8")
         return hmac_text
 
+    def _url(self, path):
+        return f'{self.BASE}{path}'
+
     def _request(self, method, path, params=None, data=None):
+        self.log.debug('sonar._request %s %s', method, path)
         now = self._current_time_ms()
         hmac_text = self._hmac_hash(now)
 
@@ -402,10 +411,11 @@ class SonarClient(object):
             )
         }
 
-        url = f'{self.BASE}{path}'
         resp = self._sess.request(
-            method, url, headers=headers, params=params, json=data
+            method, self._url(path), headers=headers, params=params, json=data
         )
+
+        self.log.debug('sonar._request response %d', resp.status_code)
         if resp.status_code == 400:
             raise SonarClientBadRequest(resp)
         if resp.status_code == 401:
@@ -420,21 +430,13 @@ class SonarClient(object):
             self.log.debug("Waiting for Sonar Rate Limit Delay")
         time.sleep(self.ratelimit_delay)
 
-        return resp.json(), resp.headers, False
+        return resp.json(), resp.headers, resp.from_cache
 
     @property
     def agents(self):
-        if self._agents is None:
-            self.log.debug('sonar.agents fetch')
-            agents = []
-
-            data, headers, cached = self._request('GET', '/system/sites')
-            self.log.debug('sonar.agents data %s', type(data))
-            agents += data
-
-            self._agents = {f'{a["name"]}.': a for a in agents}
-
-        return self._agents
+        self.log.debug('sonar.agents')
+        data, headers, cached = self._request('GET', '/system/sites')
+        return {f'{a["name"]}.': a for a in data}
 
     def agents_for_regions(self, regions):
         if regions[0] == "WORLD":

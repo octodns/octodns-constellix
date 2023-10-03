@@ -171,13 +171,6 @@ class TestConstellixProvider(TestCase):
                 provider.populate(zone)
             self.assertEqual('Unauthorized', str(ctx.exception))
 
-        with requests_mock() as mock:
-            mock.get(
-                ANY,
-                status_code=401,
-                text='{"errors": ["Unable to authenticate token"]}',
-            )
-
             with self.assertRaises(Exception) as ctx:
                 provider._sonar.agents
             self.assertEqual('Unauthorized', str(ctx.exception))
@@ -1669,6 +1662,7 @@ class TestConstellixProvider(TestCase):
         client_resp.json.side_effect = client_resp_side_effect
 
         sonar_resp_side_effect = [
+            ({}, {}, True),  # GET .../http
             ({}, {}, False),  # DELETE .../http/5678
             (
                 {},
