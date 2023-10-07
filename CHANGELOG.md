@@ -1,6 +1,14 @@
+## v0.0.? - 20xx-yy-zz - implement full-fledged and default healthchecks
+
+* Support obey, up, down for status
+* Fix the PUT based update methods
+* Use the healthcheck configuration as per [dynamic records documentation](https://github.com/octodns/octodns/blob/main/docs/dynamic_records.md)
+* Use the old provider specific healtheck config with preference, if present
+* Use real updates instead of delete/recreate for healthchecks and pools
+
 ## v0.0.4 - 2023-09-24 - ordering is important
 
-* Fix for presistent changes in dynamic rule ordering
+* Fix for persistent changes in dynamic rule ordering
 * All HTTP requests include a meaningful user agent
 
 ## v0.0.3 - 2022-11-28 - implicit fallback leads to changes
