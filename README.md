@@ -61,9 +61,8 @@ See https://github.com/octodns/octodns/blob/master/docs/dynamic_records.md#healt
 
 ConstellixProvider supports the following options:
 
-| Key  | Description | Default | Notes |
-|--|--|--|
-
+| Key | Description | Default | Notes |
+|--|--|--|--|
 | frequency | time between checks in seconds | 60 | rounded up to the next larger possible sonar_interval |
 | host | FQDN for host header and SNI in HTTP(S) mode | - | ignored for TCP checks |
 | path | path to check in HTTP(S) mode | _dns | ignored for TCP checks |
@@ -72,12 +71,11 @@ ConstellixProvider supports the following options:
 
 ConstellixProvider supports the following provider-specific options:
 
-| Key  | Description | Default | Notes |
-|--|--|--|
-
+| Key | Description | Default | Notes |
+|--|--|--|--|
 | sonar_interval | Sonar check interval | ONEMINUTE | Deprecated. Use `healthcheck/frequency` instead |
 | sonar_port | Sonar check port | 443 | Deprecated. Use `healthcheck/port` instead |
-| sonar_regions | Sonar check regions for a check. WORLD or a list of values | WORLD |
+| sonar_regions | Sonar check regions for a check. WORLD or a list of values | WORLD | - |
 | sonar_type | Sonar check type TCP/HTTP | HTTPS | Deprecated. Use `healthcheck/protocol` instead |
 
 Sonar check interval (`sonar_interval`) possible values:
