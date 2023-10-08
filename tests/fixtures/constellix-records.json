@@ -438,8 +438,8 @@
 	}]
 }, {
 	"id": 1808526,
-	"type": "SPF",
-	"recordType": "spf",
+	"type": "TXT",
+	"recordType": "txt",
 	"name": "spf",
 	"recordOption": "roundRobin",
 	"noAnswer": false,
