@@ -22,6 +22,8 @@ from octodns_constellix import (
     ConstellixClientBadRequest,
     ConstellixClientException,
     ConstellixProvider,
+    SonarClientBadRequest,
+    SonarClientNotFound,
 )
 
 
@@ -35,9 +37,9 @@ class TestConstellixProvider(TestCase):
         # Add our NS record and remove the default test case.
         for record in list(expected.records):
             if record.name == 'sub' and record._type == 'NS':
-                expected._remove_record(record)
+                expected.remove_record(record)
             if record.name == '' and record._type == 'NS':
-                expected._remove_record(record)
+                expected.remove_record(record)
         expected.add_record(
             Record.new(
                 expected,
@@ -79,6 +81,38 @@ class TestConstellixProvider(TestCase):
             {'rule-order': '1-thing'},
             provider._parse_notes('rule-order:1-thing'),
         )
+
+    def test_sonar_intervals(self):
+        provider = ConstellixProvider('test', 'api', 'secret')
+
+        expected = [
+            ('THIRTYSECONDS', -1),
+            ('THIRTYSECONDS', 0),
+            ('THIRTYSECONDS', 10),
+            ('THIRTYSECONDS', 30),
+            ('ONEMINUTE', 31),
+            ('ONEMINUTE', 60),
+            ('TWOMINUTES', 61),
+            ('TWOMINUTES', 120),
+            ('THREEMINUTES', 121),
+            ('THREEMINUTES', 180),
+            ('FOURMINUTES', 181),
+            ('FOURMINUTES', 240),
+            ('FIVEMINUTES', 241),
+            ('FIVEMINUTES', 300),
+            ('TENMINUTES', 301),
+            ('TENMINUTES', 600),
+            ('THIRTYMINUTES', 601),
+            ('THIRTYMINUTES', 1800),
+            ('HALFDAY', 1801),
+            ('HALFDAY', 43200),
+            ('DAY', 43201),
+        ]
+
+        for interval, seconds in expected:
+            self.assertEqual(
+                interval, provider._seconds_to_sonar_interval(seconds)
+            )
 
     def test_populate(self):
         provider = ConstellixProvider('test', 'api', 'secret')
@@ -208,6 +242,21 @@ class TestConstellixProvider(TestCase):
                 provider.populate(zone)
             self.assertEqual(502, ctx.exception.response.status_code)
 
+        # Not found - not cached
+        with requests_mock() as mock:
+            mock.get(ANY, status_code=404, text='')
+            with self.assertRaises(SonarClientNotFound) as ctx:
+                provider._sonar.agents
+            self.assertEqual('Not Found', str(ctx.exception))
+
+        # No JSON in response
+        with requests_mock() as mock:
+            mock.get(ANY, status_code=200, text='This is not JSON.')
+
+            with self.assertRaises(SonarClientBadRequest) as ctx:
+                provider._sonar.agents
+            self.assertEqual('\n  - This is not JSON.', str(ctx.exception))
+
         # Non-existent zone doesn't populate anything.
         with requests_mock() as mock:
             mock.get(
@@ -219,12 +268,6 @@ class TestConstellixProvider(TestCase):
             zone = Zone('unit.tests.', [])
             provider.populate(zone)
             self.assertEqual(set(), zone.records)
-
-        with requests_mock() as mock:
-            mock.get(ANY, status_code=404, text='')
-            with self.assertRaises(Exception) as ctx:
-                provider._sonar.agents
-            self.assertEqual('Not Found', str(ctx.exception))
 
         # Sonar Normal response.
         provider = ConstellixProvider('test', 'api', 'secret')
@@ -523,7 +566,7 @@ class TestConstellixProvider(TestCase):
                 ),
                 call(
                     'POST',
-                    '/domains/123123/records/SPF',
+                    '/domains/123123/records/TXT',
                     data={
                         'name': 'spf',
                         'ttl': 600,
@@ -974,6 +1017,7 @@ class TestConstellixProvider(TestCase):
                         'port': 80,
                         'checkSites': [1],
                         'interval': 'ONEMINUTE',
+                        'monitorIntervalPolicy': 'ONCEPERREGION',
                         'ipVersion': 'IPV4',
                     },
                 ),  # only returns 201 / created with new ID in header
@@ -987,6 +1031,7 @@ class TestConstellixProvider(TestCase):
                         'port': 80,
                         'checkSites': [1],
                         'interval': 'ONEMINUTE',
+                        'monitorIntervalPolicy': 'ONCEPERREGION',
                         'ipVersion': 'IPV4',
                     },
                 ),  # only returns 201 / created with new ID in header
@@ -1268,6 +1313,7 @@ class TestConstellixProvider(TestCase):
             [
                 {'id': 1808522, 'name': 'unit.tests.:www.dynamic:A:one'}
             ],  # pool created in apply
+            [],  # Pools returned during populate (from cache)
             [
                 {'id': 1808521, 'name': 'unit.tests.:www.dynamic:A:two'}
             ],  # pool created in apply
@@ -1436,6 +1482,7 @@ class TestConstellixProvider(TestCase):
                         ],
                     },
                 ),
+                call('GET', '/pools/A'),  # From cache
                 call(
                     'POST',
                     '/pools/A',
@@ -1669,7 +1716,6 @@ class TestConstellixProvider(TestCase):
 
         sonar_resp_side_effect = [
             ({}, {}, True),  # GET .../http
-            ({}, {}, False),  # DELETE .../http/5678
             (
                 {},
                 {'Location': 'http://api.sonar.constellix.com/rest/api/5678'},
@@ -1680,8 +1726,6 @@ class TestConstellixProvider(TestCase):
                 {},
                 False,
             ),  # GET .../http/5678
-            ({}, {}, False),  # DELETE .../http/5789
-            # ({},{}),  # DELETE .../http/6789
             (
                 {},
                 {'Location': 'http://api.sonar.constellix.com/rest/api/9678'},
@@ -1942,16 +1986,12 @@ class TestConstellixProvider(TestCase):
         ) as fh:
             provider._client.records = Mock(return_value=json.load(fh))
 
-        with open(
-            'tests/fixtures/constellix-pools-A-two-simple-full-cache.json'
-        ) as fh:
-            provider._client.pools = Mock(return_value=json.load(fh))
-
         provider._client.geofilters = Mock(return_value=[])
 
         wanted = Zone('unit.tests.', [])
 
-        resp.json.side_effect = [['{}'], ['{}']]
+        with open('tests/fixtures/constellix-pool-A-two-simple.json') as fh:
+            resp.json.side_effect = [json.load(fh), [{}]]
         wanted.add_record(
             Record.new(
                 wanted,
@@ -2055,6 +2095,16 @@ class TestConstellixProvider(TestCase):
         # Try an error we can handle
         with requests_mock() as mock:
             mock.get(
+                'https://api.dns.constellix.com/v1/pools/A/1808521',
+                status_code=200,
+                text='{"id": 1808521, "name": "two", "values": [{"value": "1.2.3.6", "weight": 1}, {"value": "1.2.3.7", "weight": 1}]}',
+            )
+            mock.get(
+                'https://api.dns.constellix.com/v1/pools/A/1808522',
+                status_code=200,
+                text='{"id": 1808522, "name": "one", "values": [{"value": "1.2.3.4", "weight": 1}, {"value": "1.2.3.5", "weight": 1}]}',
+            )
+            mock.get(
                 'https://api.dns.constellix.com/v1/domains',
                 status_code=200,
                 text='[{"id": 1234, "name": "unit.tests", "hasGeoIP": true}]',
@@ -2073,32 +2123,32 @@ class TestConstellixProvider(TestCase):
             mock.get(
                 'https://api.sonar.constellix.com/rest/api/http',
                 status_code=200,
-                text='{}',
+                text='[]',
             )
             mock.put(
                 'https://api.dns.constellix.com/v1/pools/A/1808521',
                 status_code=400,
-                text='{"errors": [\"no changes to save\"]}',
+                text='{"errors": ["no changes to save"]}',
             )
             mock.put(
                 'https://api.dns.constellix.com/v1/pools/A/1808522',
                 status_code=400,
-                text='{"errors": [\"no changes to save\"]}',
+                text='{"errors": ["no changes to save"]}',
             )
             mock.put(
                 'https://api.dns.constellix.com/v1/geoFilters/5303',
                 status_code=400,
-                text='{"errors": [\"no changes to save\"]}',
+                text='{"errors": ["no changes to save"]}',
             )
             mock.put(
                 'https://api.dns.constellix.com/v1/geoFilters/9303',
                 status_code=400,
-                text='{"errors": [\"no changes to save\"]}',
+                text='{"errors": ["no changes to save"]}',
             )
             mock.post(
                 'https://api.sonar.constellix.com/rest/api/http',
-                status_code=200,
-                text='{}',
+                status_code=201,
+                text='{"bar":"baz"}',
                 headers={
                     'Location': 'https://api.sonar.constellix.com/rest/api/http/5678'
                 },
@@ -2106,6 +2156,7 @@ class TestConstellixProvider(TestCase):
             mock.get(
                 'https://api.sonar.constellix.com/rest/api/http/5678',
                 status_code=200,
+                headers={'Content-Type': 'application/json'},
                 text='{"id":5678,"name":"www.dynamic:A:one-1.2.3.7"}',
             )
             mock.post(
@@ -2189,6 +2240,16 @@ class TestConstellixProvider(TestCase):
                 status_code=200,
                 text='{"id": 1234, "name": "unit.tests", "hasGeoIP": true}',
             )
+            mock.get(
+                'https://api.dns.constellix.com/v1/pools/A/1808521',
+                status_code=200,
+                text='{"id": 1808521, "name": "something", "values": []}',
+            )
+            mock.get(
+                'https://api.dns.constellix.com/v1/pools/A/1808522',
+                status_code=200,
+                text='{"id": 1808522, "name": "something", "values": []}',
+            )
             mock.delete(ANY, status_code=200, text='{}')
             mock.get(
                 'https://api.sonar.constellix.com/rest/api/system/sites',
@@ -2217,7 +2278,7 @@ class TestConstellixProvider(TestCase):
             )
             mock.post(
                 'https://api.sonar.constellix.com/rest/api/http',
-                status_code=200,
+                status_code=201,
                 headers={'Location': '5678'},
                 text='{}',
             )
@@ -2249,6 +2310,16 @@ class TestConstellixProvider(TestCase):
                 status_code=200,
                 text='{"id": 1234, "name": "unit.tests", "hasGeoIP": true}',
             )
+            mock.get(
+                'https://api.dns.constellix.com/v1/pools/A/1808521',
+                status_code=200,
+                text='{"id": 1808521, "name": "something", "values": []}',
+            )
+            mock.get(
+                'https://api.dns.constellix.com/v1/pools/A/1808522',
+                status_code=200,
+                text='{"id": 1808522, "name": "something", "values": []}',
+            )
             mock.delete(ANY, status_code=200, text='{}')
             mock.get(
                 'https://api.sonar.constellix.com/rest/api/system/sites',
@@ -2277,13 +2348,14 @@ class TestConstellixProvider(TestCase):
             )
             mock.post(
                 'https://api.sonar.constellix.com/rest/api/http',
-                status_code=200,
+                status_code=201,
                 headers={'Location': '5678'},
                 text='{}',
             )
             mock.get(
                 'https://api.sonar.constellix.com/rest/api/http/5678',
                 status_code=200,
+                headers={'Content-Type': 'application/json'},
                 text='{"id":5678,"name":"www.dynamic:A:one-1.2.3.7"}',
             )
             mock.post(
@@ -2306,67 +2378,31 @@ class TestConstellixProvider(TestCase):
         ) as fh:
             provider._client.pools = Mock(return_value=json.load(fh))
 
-        self.assertIsNone(provider._client.pool_by_id('A', 1))
-        self.assertIsNone(provider._client.pool_by_name('A', 'foobar'))
+        with requests_mock() as mock:
+            mock.get(
+                'https://api.dns.constellix.com/v1/pools/A/1',
+                status_code=404,
+                text='{"error": "notfound"}',
+            )
+            mock.get(
+                'https://api.dns.constellix.com/v1/pools/A',
+                status_code=200,
+                text='[{"id": 1808521, "name": "something", "values": []}]',
+            )
+            mock.get(
+                'https://api.dns.constellix.com/v1/pools/A',
+                status_code=200,
+                text='[{"id": 2, "name": "disappeared", "values": []}]',
+            )
+            mock.get(
+                'https://api.dns.constellix.com/v1/pools/A/2',
+                status_code=404,
+                text='{"error": "notfound"}',
+            )
 
-    def test_pools_are_cached_correctly(self):
-        provider = ConstellixProvider('test', 'api', 'secret')
-
-        with open(
-            'tests/fixtures/constellix-pools-A-two-simple-full-cache.json'
-        ) as fh:
-            provider._client.pools = Mock(return_value=json.load(fh))
-
-        found = provider._client.pool_by_name(
-            'A', 'unit.tests.:www.dynamic:A:two'
-        )
-        self.assertIsNotNone(found)
-
-        not_found = provider._client.pool_by_name(
-            'AAAA', 'unit.tests.:www.dynamic:A:two'
-        )
-        self.assertIsNone(not_found)
-
-        provider._client.pools = Mock(
-            return_value=[
-                {
-                    'id': 42,
-                    'name': 'unit.tests.:www.dynamic:A:two',
-                    'type': 'A',
-                    'values': [
-                        {
-                            'value': '1.2.3.4',
-                            'weight': 1,
-                            'policy': 'followsonar',
-                        }
-                    ],
-                    'failedFlag': False,
-                },
-                {
-                    'id': 451,
-                    'name': 'unit.tests.:www.dynamic:A:two',
-                    'type': 'AAAA',
-                    'values': [
-                        {
-                            'value': '1.2.3.4',
-                            'weight': 1,
-                            'policy': 'followsonar',
-                        }
-                    ],
-                    'failedFlag': False,
-                },
-            ]
-        )
-
-        a_pool = provider._client.pool_by_name(
-            'A', 'unit.tests.:www.dynamic:A:two'
-        )
-        self.assertEqual(42, a_pool['id'])
-
-        aaaa_pool = provider._client.pool_by_name(
-            'AAAA', 'unit.tests.:www.dynamic:A:two'
-        )
-        self.assertEqual(451, aaaa_pool['id'])
+            self.assertIsNone(provider._client.pool_by_id('A', 1))
+            self.assertIsNone(provider._client.pool_by_name('A', 'foobar'))
+            self.assertIsNone(provider._client.pool_by_name('A', 'disappeared'))
 
     def test_global_geofilter_untouched(self):
         provider = ConstellixProvider('test', 'api', 'secret')
