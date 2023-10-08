@@ -57,16 +57,30 @@ ConstellixProvider supports dynamic records.
 
 #### Health Check Options
 
-See https://github.com/octodns/octodns/blob/master/docs/dynamic_records.md#health-checks for information on health checking for dynamic records. ConstellixProvider supports the following options:
+See https://github.com/octodns/octodns/blob/master/docs/dynamic_records.md#health-checks for information on health checking for dynamic records.
 
-| Key  | Description | Default |
+ConstellixProvider supports the following options:
+
+| Key  | Description | Default | Notes |
 |--|--|--|
-| sonar_interval | Sonar check interval | ONEMINUTE |
-| sonar_port | Sonar check port | 80 |
-| sonar_regions | Sonar check regions for a check. WORLD or a list of values | WORLD |
-| sonar_type | Sonar check type TCP/HTTP | TCP |
 
-Sonar check interval (sonar_interval) possible values:
+| frequency | time between checks in seconds | 60 | rounded up to the next larger possible sonar_interval |
+| host | FQDN for host header and SNI in HTTP(S) mode | - | ignored for TCP checks |
+| path | path to check in HTTP(S) mode | _dns | ignored for TCP checks |
+| port | port to check | 443 | - |
+| protocol | HTTP/HTTPS/TCP | HTTPS | - |
+
+ConstellixProvider supports the following provider-specific options:
+
+| Key  | Description | Default | Notes |
+|--|--|--|
+
+| sonar_interval | Sonar check interval | ONEMINUTE | Deprecated. Use `healthcheck/frequency` instead |
+| sonar_port | Sonar check port | 443 | Deprecated. Use `healthcheck/port` instead |
+| sonar_regions | Sonar check regions for a check. WORLD or a list of values | WORLD |
+| sonar_type | Sonar check type TCP/HTTP | HTTPS | Deprecated. Use `healthcheck/protocol` instead |
+
+Sonar check interval (`sonar_interval`) possible values:
 
 * FIVESECONDS
 * THIRTYSECONDS
@@ -80,7 +94,7 @@ Sonar check interval (sonar_interval) possible values:
 * HALFDAY
 * DAY
 
-Sonar check regions (sonar_regions) possible values:
+Sonar check regions (`sonar_regions`) possible values:
 
 * ASIAPAC
 * EUROPE
@@ -93,14 +107,23 @@ Sonar check regions (sonar_regions) possible values:
 ```yaml
 ---
   octodns:
+    healthcheck:
+      frequency: 60
+      host: my-host-name
+      path: /dns-health-check
+      port: 443
+      protocol: HTTPS
     constellix:
       healthcheck:
-        sonar_interval: DAY
-        sonar_port: 80
+        # deprecated
+        # sonar_interval: DAY
+        # deprecated
+        # sonar_port: 443
         sonar_regions:
         - ASIAPAC
         - EUROPE
-        sonar_type: TCP
+        # deprecated
+        # sonar_type: HTTPS
 ```
 
 ### Development

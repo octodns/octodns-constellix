@@ -900,7 +900,7 @@ class ConstellixProvider(BaseProvider):
 
         healthcheck['interval'] = sonar_healthcheck.get(
             'sonar_interval', None
-        ) or self._seconds_to_sonar_interval(healthcheck.get('interval', 60))
+        ) or self._seconds_to_sonar_interval(healthcheck.get('frequency', 60))
 
         return healthcheck
 
