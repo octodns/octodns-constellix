@@ -1,4 +1,4 @@
-## v0.0.? - 20xx-yy-zz - implement full-fledged and default healthchecks
+## v0.1.0 - 20xx-yy-zz - implement full-fledged and default healthchecks
 
 * Support obey, up, down for status
 * Fix the PUT based update methods
