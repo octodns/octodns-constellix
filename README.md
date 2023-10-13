@@ -18,8 +18,8 @@ Pinning specific versions or SHAs is recommended to avoid unplanned upgrades.
 
 ```
 # Start with the latest versions and don't just copy what's here
-octodns==0.9.14
-octodns-constellix==0.0.1
+octodns==1.2.1
+octodns-constellix==0.1.0
 ```
 
 ##### SHAs
@@ -49,7 +49,7 @@ providers:
 
 #### Records
 
-ConstellixProvider supports A, AAAA, ALIAS (ANAME), CAA, CNAME, MX, NS, PTR, SPF, SRV, and TXT. There are some restrictions on CAA tags support.
+ConstellixProvider supports A, AAAA, ALIAS (ANAME), CAA, CNAME, MX, NS, PTR, SRV, and TXT. There are some restrictions on CAA tags support.
 
 #### Dynamic
 
@@ -106,6 +106,7 @@ Sonar check regions (`sonar_regions`) possible values:
 ---
   octodns:
     healthcheck:
+      # This is still provider-specific for constellix and WIP for other providers
       frequency: 60
       host: my-host-name
       path: /dns-health-check
