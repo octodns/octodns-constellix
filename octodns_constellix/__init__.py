@@ -456,19 +456,7 @@ class ConstellixProvider(BaseProvider):
     SUPPORTS_DYNAMIC = True
     SUPPORTS_ROOT_NS = False
     SUPPORTS = set(
-        (
-            'A',
-            'AAAA',
-            'ALIAS',
-            'CAA',
-            'CNAME',
-            'MX',
-            'NS',
-            'PTR',
-            'SPF',
-            'SRV',
-            'TXT',
-        )
+        ('A', 'AAAA', 'ALIAS', 'CAA', 'CNAME', 'MX', 'NS', 'PTR', 'SRV', 'TXT')
     )
 
     def __init__(
@@ -667,8 +655,6 @@ class ConstellixProvider(BaseProvider):
         ]
         return {'ttl': records[0]['ttl'], 'type': _type, 'values': values}
 
-    _data_for_SPF = _data_for_TXT
-
     def _data_for_MX(self, _type, records):
         values = []
         record = records[0]
@@ -832,8 +818,6 @@ class ConstellixProvider(BaseProvider):
         for value in record.chunked_values:
             values.append({'value': value.replace('\\;', ';')})
         yield {'name': record.name, 'ttl': record.ttl, 'roundRobin': values}
-
-    _params_for_SPF = _params_for_TXT
 
     def _params_for_CAA(self, record):
         values = []

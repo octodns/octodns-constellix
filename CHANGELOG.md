@@ -1,3 +1,7 @@
+## v0.0.x - 2023-10-xx - remove support for SPF records
+
+* Replace SPF records with TXT records to prepare for octodns v2
+
 ## v0.0.4 - 2023-09-24 - ordering is important
 
 * Fix for presistent changes in dynamic rule ordering

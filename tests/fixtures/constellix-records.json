@@ -438,7 +438,7 @@
 	}]
 }, {
 	"id": 1808526,
-	"type": "SPF",
+	"type": "TXT",
 	"recordType": "spf",
 	"name": "spf",
 	"recordOption": "roundRobin",

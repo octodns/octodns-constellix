@@ -514,7 +514,7 @@ class TestConstellixProvider(TestCase):
                 ),
                 call(
                     'POST',
-                    '/domains/123123/records/SPF',
+                    '/domains/123123/records/TXT',
                     data={
                         'name': 'spf',
                         'ttl': 600,
