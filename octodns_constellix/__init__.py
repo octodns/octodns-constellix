@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import logging
 import time
-from base64 import b64encode, standard_b64encode
+from base64 import b64encode
 from collections import defaultdict
 
 from pycountry_convert import country_alpha2_to_continent_code
@@ -20,30 +20,29 @@ from octodns.record import Record
 __VERSION__ = '0.0.4'
 
 
-class ConstellixClientException(ProviderException):
+class ConstellixAPIException(ProviderException):
     pass
 
 
-class ConstellixClientBadRequest(ConstellixClientException):
-    def __init__(self, resp):
-        errors = '\n  - '.join(resp.json()['errors'])
+class ConstellixAPIBadRequest(ConstellixAPIException):
+    def __init__(self, data):
+        errors = '\n  - '.join(data.get('errors', []))
         super().__init__(f'\n  - {errors}')
 
 
-class ConstellixClientUnauthorized(ConstellixClientException):
+class ConstellixAPIUnauthorized(ConstellixAPIException):
     def __init__(self):
         super().__init__('Unauthorized')
 
 
-class ConstellixClientNotFound(ConstellixClientException):
+class ConstellixAPINotFound(ConstellixAPIException):
     def __init__(self):
         super().__init__('Not Found')
 
 
-class ConstellixClient(object):
-    BASE = 'https://api.dns.constellix.com/v1'
-
-    def __init__(self, log, api_key, secret_key, ratelimit_delay=0.0):
+class ConstellixAPI(object):
+    def __init__(self, base_url, log, api_key, secret_key, ratelimit_delay):
+        self.base_url = base_url
         self.log = log
         self.api_key = api_key
         self.secret_key = secret_key
@@ -51,47 +50,84 @@ class ConstellixClient(object):
         self._sess = Session()
         self._sess.headers.update(
             {
-                'x-cnsdns-apiKey': self.api_key,
-                'User-Agent': f'octodns/{octodns_version} octodns-constellix/{__VERSION__}',
+                'User-Agent': f'octodns/{octodns_version} octodns-constellix/{__VERSION__}'
             }
         )
-        self._domains = None
-        self._pools = {'A': None, 'AAAA': None, 'CNAME': None}
-        self._geofilters = None
 
     def _current_time(self):
         return str(int(time.time() * 1000))
 
-    def _hmac_hash(self, now):
-        return hmac.new(
-            self.secret_key.encode('utf-8'),
-            now.encode('utf-8'),
-            digestmod=hashlib.sha1,
-        ).digest()
+    def _hmac_text(self, now):
+        return b64encode(
+            hmac.new(
+                self.secret_key.encode('utf-8'),
+                now.encode('utf-8'),
+                digestmod=hashlib.sha1,
+            ).digest()
+        )
+
+    def _url(self, path):
+        return f'{self.base_url}{path}'
+
+    def _get_json(self, response):
+        try:
+            return response.json()
+        except:
+            raise ConstellixAPIBadRequest({'errors': [response.text]})
 
     def _request(self, method, path, params=None, data=None):
-        self.log.debug("Call _request %s %s", method, path)
+        url = self._url(path)
+        self.log.debug('Call _request %s %s', method, url)
         now = self._current_time()
-        hmac_hash = self._hmac_hash(now)
+        hmac_text = self._hmac_text(now)
+        auth_token = f'{self.api_key}:{hmac_text}:{now}'
 
         headers = {
-            'x-cnsdns-hmac': b64encode(hmac_hash),
-            'x-cnsdns-requestDate': now,
+            'x-cns-security-token': auth_token,  # v1, v2, sonar
+            'authorization': f'Bearer {auth_token}',  # v4
         }
 
-        url = f'{self.BASE}{path}'
         resp = self._sess.request(
             method, url, headers=headers, params=params, json=data
         )
-        if resp.status_code == 400:
-            raise ConstellixClientBadRequest(resp)
-        if resp.status_code == 401:
-            raise ConstellixClientUnauthorized()
-        if resp.status_code == 404:
-            raise ConstellixClientNotFound()
+
+        status_code = resp.status_code
+        headers = resp.headers
+
+        if status_code == 400:
+            raise ConstellixAPIBadRequest(self._get_json(resp))
+        if status_code == 401:
+            raise ConstellixAPIUnauthorized()
+        if status_code == 404:
+            raise ConstellixAPINotFound()
         resp.raise_for_status()
+
+        if self.ratelimit_delay >= 1.0:
+            self.log.info('Waiting for Constellix Limit Delay')
+        elif self.ratelimit_delay > 0.0:
+            self.log.debug('Waiting for Constellix Rate Limit Delay')
         time.sleep(self.ratelimit_delay)
-        return resp
+
+        return resp, self._get_json(resp), headers
+
+
+class ConstellixClient(ConstellixAPI):
+    def __init__(self, log, api_key, secret_key, ratelimit_delay=0.0):
+        super().__init__(
+            'https://api.dns.constellix.com/v1',
+            log,
+            api_key,
+            secret_key,
+            ratelimit_delay,
+        )
+
+        self._domains = None
+        self._pools = {'A': None, 'AAAA': None, 'CNAME': None}
+        self._geofilters = None
+
+    def _request(self, method, path, params=None, data=None):
+        response, data, headers = super()._request(method, path, params, data)
+        return response
 
     @property
     def domains(self):
@@ -108,7 +144,7 @@ class ConstellixClient(object):
     def domain(self, name):
         zone_id = self.domains.get(name, False)
         if not zone_id:
-            raise ConstellixClientNotFound()
+            raise ConstellixAPINotFound()
         path = f'/domains/{zone_id}'
         return self._request('GET', path).json()
 
@@ -137,7 +173,7 @@ class ConstellixClient(object):
     def records(self, zone_name):
         zone_id = self.domains.get(zone_name, False)
         if not zone_id:
-            raise ConstellixClientNotFound()
+            raise ConstellixAPINotFound()
         path = f'/domains/{zone_id}/records'
 
         resp = self._request('GET', path).json()
@@ -215,7 +251,7 @@ class ConstellixClient(object):
         try:
             data = self._request('PUT', path, data=data).json()
 
-        except ConstellixClientBadRequest as e:
+        except ConstellixAPIBadRequest as e:
             message = str(e)
             if not message or (
                 "no changes to save" not in message
@@ -269,7 +305,7 @@ class ConstellixClient(object):
         try:
             data = self._request('PUT', path, data=data).json()
 
-        except ConstellixClientBadRequest as e:
+        except ConstellixAPIBadRequest as e:
             message = str(e)
             if not message or (
                 "no changes to save" not in message
@@ -288,80 +324,20 @@ class ConstellixClient(object):
         return resp
 
 
-class SonarClientException(ProviderException):
-    pass
-
-
-class SonarClientBadRequest(SonarClientException):
-    def __init__(self, resp):
-        errors = resp.text
-        super().__init__(f'\n  - {errors}')
-
-
-class SonarClientUnauthorized(SonarClientException):
-    def __init__(self):
-        super().__init__('Unauthorized')
-
-
-class SonarClientNotFound(SonarClientException):
-    def __init__(self):
-        super().__init__('Not Found')
-
-
-class SonarClient(object):
-    BASE = 'https://api.sonar.constellix.com/rest/api'
-
+class SonarClient(ConstellixAPI):
     def __init__(self, log, api_key, secret_key, ratelimit_delay=0.0):
-        self.log = log
-        self.api_key = api_key
-        self.secret_key = secret_key
-        self.ratelimit_delay = ratelimit_delay
-        self._sess = Session()
-        self._sess.headers = {
-            'Content-Type': 'application/json',
-            'User-Agent': f'octodns/{octodns_version} octodns-constellix/{__VERSION__}',
-        }
+        super().__init__(
+            'https://api.sonar.constellix.com/rest/api',
+            log,
+            api_key,
+            secret_key,
+            ratelimit_delay,
+        )
         self._agents = None
         self._checks = {'tcp': None, 'http': None}
 
-    def _current_time_ms(self):
-        return str(int(time.time() * 1000))
-
-    def _hmac_hash(self, now):
-        digester = hmac.new(
-            bytes(self.secret_key, "UTF-8"), bytes(now, "UTF-8"), hashlib.sha1
-        )
-        signature = digester.digest()
-        hmac_text = str(standard_b64encode(signature), "UTF-8")
-        return hmac_text
-
     def _request(self, method, path, params=None, data=None):
-        now = self._current_time_ms()
-        hmac_text = self._hmac_hash(now)
-
-        headers = {
-            'x-cns-security-token': "{}:{}:{}".format(
-                self.api_key, hmac_text, now
-            )
-        }
-
-        url = f'{self.BASE}{path}'
-        resp = self._sess.request(
-            method, url, headers=headers, params=params, json=data
-        )
-        if resp.status_code == 400:
-            raise SonarClientBadRequest(resp)
-        if resp.status_code == 401:
-            raise SonarClientUnauthorized()
-        if resp.status_code == 404:
-            raise SonarClientNotFound()
-        resp.raise_for_status()
-
-        if self.ratelimit_delay >= 1.0:
-            self.log.info("Waiting for Sonar Rate Limit Delay")
-        elif self.ratelimit_delay > 0.0:
-            self.log.debug("Waiting for Sonar Rate Limit Delay")
-        time.sleep(self.ratelimit_delay)
+        resp, data, headers = super()._request(method, path, params, data)
 
         return resp
 
@@ -702,7 +678,7 @@ class ConstellixProvider(BaseProvider):
         if zone.name not in self._zone_records:
             try:
                 self._zone_records[zone.name] = self._client.records(zone.name)
-            except ConstellixClientNotFound:
+            except ConstellixAPINotFound:
                 return []
 
         return self._zone_records[zone.name]
@@ -872,12 +848,13 @@ class ConstellixProvider(BaseProvider):
         health_data = {}
         for pool_name, pool in pool_data.items():
             for value in pool['values']:
-                check_name = '{}-{}'.format(pool_name, value['value'])
+                check_value = value['value']
+                check_name = f'{pool_name}-{check_value}'
                 check_obj = self._create_update_check(
                     pool_type=record._type,
                     check_name=check_name,
                     check_type=healthcheck['sonar_type'].lower(),
-                    value=value['value'],
+                    value=check_value,
                     port=healthcheck['sonar_port'],
                     interval=healthcheck['sonar_interval'],
                     sites=check_sites,
@@ -1159,7 +1136,7 @@ class ConstellixProvider(BaseProvider):
 
         try:
             self._client.domain(desired.name)
-        except ConstellixClientNotFound:
+        except ConstellixAPINotFound:
             self.log.debug('_apply:   no matching zone, creating domain')
             self._client.domain_create(desired.name[:-1])
 

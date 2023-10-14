@@ -17,8 +17,8 @@ from octodns.record import Record
 from octodns.zone import Zone
 
 from octodns_constellix import (
+    ConstellixAPIBadRequest,
     ConstellixClient,
-    ConstellixClientBadRequest,
     ConstellixProvider,
 )
 
@@ -2057,7 +2057,7 @@ class TestConstellixProvider(TestCase):
 
             plan = provider.plan(wanted)
             self.assertEqual(1, len(plan.changes))
-            with self.assertRaises(ConstellixClientBadRequest):
+            with self.assertRaises(ConstellixAPIBadRequest):
                 provider.apply(plan)
 
         # Now what happens if an error happens that we can't handle
@@ -2092,7 +2092,7 @@ class TestConstellixProvider(TestCase):
 
             plan = provider.plan(wanted)
             self.assertEqual(1, len(plan.changes))
-            with self.assertRaises(ConstellixClientBadRequest):
+            with self.assertRaises(ConstellixAPIBadRequest):
                 provider.apply(plan)
 
     def test_pools_that_are_notfound(self):
