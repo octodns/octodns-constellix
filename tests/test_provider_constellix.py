@@ -3,6 +3,7 @@
 #
 
 import logging
+import time
 from os.path import dirname, join
 from unittest import TestCase
 from unittest.mock import Mock, PropertyMock, call
@@ -17,6 +18,7 @@ from octodns.record import Record
 from octodns.zone import Zone
 
 from octodns_constellix import (
+    ConstellixAPI,
     ConstellixAPIBadRequest,
     ConstellixClient,
     ConstellixProvider,
@@ -2284,7 +2286,7 @@ class TestConstellixProvider(TestCase):
 class TestConstellixClient(TestCase):
     def test_unknown_geofilter(self):
         log = logging.getLogger('client')
-        client = ConstellixClient(log, 'test', 'api', 'secret')
+        client = ConstellixClient(log, 'api', 'secret')
 
         resp = Mock()
         resp.json = Mock()
@@ -2293,3 +2295,56 @@ class TestConstellixClient(TestCase):
         resp.json.side_effect = resp_side_effect
 
         self.assertIsNone(client.geofilter_by_id(9999999))
+
+
+class TestConstellixAPI(TestCase):
+    def test_v1_v2_sonar_auth(self):
+        log = logging.getLogger('client')
+        api_key = 'api'
+        secret_key = 'test'
+        time.time = Mock(return_value=1234567890.1234)
+        for base_url in [
+            'https://api.dns.constellix.com/v1',
+            'https://api.dns.constellix.com/v2',
+            'https://api.sonar.constellix.com/rest/api',
+        ]:
+            api = ConstellixAPI(base_url, log, api_key, secret_key, 0.0)
+
+            auth_header = api._auth_header()
+            auth_token = auth_header.get('x-cns-security-token', None)
+            self.assertIsNotNone(auth_token)
+            self.assertIsNone(auth_header.get('authorization', None))
+
+            parts = auth_token.split(':')
+            self.assertEqual(3, len(parts))
+
+            self.assertEqual(api_key, parts[0])
+            self.assertEqual('S5VaK5DN7gpfTGh1975BlT6xw7k=', parts[1])
+            self.assertEqual(str(int(time.time() * 1000)), parts[2])
+
+    def test_v4_sonar_auth(self):
+        pass
+        log = logging.getLogger('client')
+        api_key = 'api'
+        secret_key = 'test'
+        time.time = Mock(return_value=1234567890.1234)
+
+        api = ConstellixAPI(
+            'https://api.dns.constellix.com/v4', log, api_key, secret_key, 0.0
+        )
+
+        auth_header = api._auth_header()
+        auth_value = auth_header.get('Authorization', None)
+        bearer_prefix = 'Bearer '
+        self.assertIsNotNone(auth_value)
+        self.assertIsNone(auth_header.get('x-cns-security-token', None))
+        self.assertTrue(auth_value.startswith(bearer_prefix))
+
+        auth_token = auth_value[len(bearer_prefix) :]
+
+        parts = auth_token.split(':')
+        self.assertEqual(3, len(parts))
+
+        self.assertEqual(api_key, parts[0])
+        self.assertEqual('S5VaK5DN7gpfTGh1975BlT6xw7k=', parts[1])
+        self.assertEqual(str(int(time.time() * 1000)), parts[2])

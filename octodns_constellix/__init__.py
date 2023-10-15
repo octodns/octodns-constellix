@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import logging
 import time
-from base64 import b64encode
+from base64 import standard_b64encode
 from collections import defaultdict
 
 from pycountry_convert import country_alpha2_to_continent_code
@@ -54,18 +54,6 @@ class ConstellixAPI(object):
             }
         )
 
-    def _current_time(self):
-        return str(int(time.time() * 1000))
-
-    def _hmac_text(self, now):
-        return b64encode(
-            hmac.new(
-                self.secret_key.encode('utf-8'),
-                now.encode('utf-8'),
-                digestmod=hashlib.sha1,
-            ).digest()
-        )
-
     def _url(self, path):
         return f'{self.base_url}{path}'
 
@@ -75,17 +63,30 @@ class ConstellixAPI(object):
         except:
             raise ConstellixAPIBadRequest({'errors': [response.text]})
 
+    def _auth_header(self):
+        now = str(int(time.time() * 1000))
+        hmac_text = str(
+            standard_b64encode(
+                hmac.new(
+                    self.secret_key.encode('utf-8'),
+                    now.encode('utf-8'),
+                    digestmod=hashlib.sha1,
+                ).digest()
+            ),
+            'UTF-8',
+        )
+        auth_token = f'{self.api_key}:{hmac_text}:{now}'
+
+        if self.base_url.endswith('/v4'):
+            return {'Authorization': f'Bearer {auth_token}'}
+        else:
+            return {'x-cns-security-token': auth_token}
+
     def _request(self, method, path, params=None, data=None):
         url = self._url(path)
         self.log.debug('Call _request %s %s', method, url)
-        now = self._current_time()
-        hmac_text = self._hmac_text(now)
-        auth_token = f'{self.api_key}:{hmac_text}:{now}'
 
-        headers = {
-            'x-cns-security-token': auth_token,  # v1, v2, sonar
-            'authorization': f'Bearer {auth_token}',  # v4
-        }
+        headers = self._auth_header()
 
         resp = self._sess.request(
             method, url, headers=headers, params=params, json=data
