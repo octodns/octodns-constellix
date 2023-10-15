@@ -103,10 +103,6 @@ class ConstellixAPI(object):
             raise ConstellixAPINotFound()
         resp.raise_for_status()
 
-        if self.ratelimit_delay >= 1.0:
-            self.log.info('Waiting for Constellix Limit Delay')
-        elif self.ratelimit_delay > 0.0:
-            self.log.debug('Waiting for Constellix Rate Limit Delay')
         time.sleep(self.ratelimit_delay)
 
         return resp, self._get_json(resp), headers
