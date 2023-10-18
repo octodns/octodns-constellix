@@ -1,3 +1,8 @@
+## v0.0.5 - 2023-10-xx - refactor API code
+
+* Use a common code base for ConstellixClient and SonarClient
+* Prepare the authZ code for v4 (Authorization: Bearer)
+
 ## v0.0.4 - 2023-09-24 - ordering is important
 
 * Fix for presistent changes in dynamic rule ordering
