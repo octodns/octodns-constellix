@@ -636,7 +636,8 @@ class ConstellixProvider(BaseProvider):
 
     def _data_for_TXT(self, _type, records):
         values = [
-            value['value'].replace(';', '\\;') for value in records[0]['value']
+            value['value'].replace(';', '\\;').replace('""', '" "')
+            for value in records[0]['value']
         ]
         return {'ttl': records[0]['ttl'], 'type': _type, 'values': values}
 
@@ -800,10 +801,12 @@ class ConstellixProvider(BaseProvider):
             yield {'name': record.name, 'ttl': record.ttl, 'roundRobin': values}
 
     def _params_for_TXT(self, record):
-        # Constellix does not want values escaped
+        # Constellix does not want values escaped and uses "" instead of " " as a separator
         values = []
         for value in record.chunked_values:
-            values.append({'value': value.replace('\\;', ';')})
+            values.append(
+                {'value': value.replace('\\;', ';').replace('" "', '""')}
+            )
         yield {'name': record.name, 'ttl': record.ttl, 'roundRobin': values}
 
     _params_for_SPF = _params_for_TXT

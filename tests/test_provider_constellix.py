@@ -256,14 +256,14 @@ class TestConstellixProvider(TestCase):
 
                 zone = Zone('unit.tests.', [])
                 provider.populate(zone)
-                self.assertEqual(17, len(zone.records))
+                self.assertEqual(18, len(zone.records))
                 changes = expected.changes(zone, provider)
                 self.assertEqual(0, len(changes))
 
         # 2nd populate makes no network calls/all from cache
         again = Zone('unit.tests.', [])
         provider.populate(again)
-        self.assertEqual(17, len(again.records))
+        self.assertEqual(18, len(again.records))
 
         # Bust the cache.
         del provider._zone_records[zone.name]
@@ -317,21 +317,22 @@ class TestConstellixProvider(TestCase):
             [],
             [],
             [],
+            [],
         ]
         resp.json.side_effect = resp_side_effect
 
         plan = provider.plan(expected)
 
-        # 23 records given in unit.tests.yaml
+        # 24 records given in unit.tests.yaml
         #  1 ALIAS record added
         #  1 Root NS record removed by test setup
-        # 23 records exepected
+        # 24 records exepected
         #  1 ignored
         #  1 exclued
         #  5 unsupported: URLFWD, NAPTR, LOC, SSHFP, DNAME
-        #  8 records not applied
-        # 16 records applied
-        self.assertEqual(len(expected.records), 23)
+        #  7 records not applied
+        # 18 records applied
+        self.assertEqual(len(expected.records), 24)
         n = len(expected.records) - 7
         self.assertEqual(n, len(plan.changes))
         self.assertEqual(n, provider.apply(plan))
@@ -540,6 +541,29 @@ class TestConstellixProvider(TestCase):
                                     'p=A/kinda+of/long/string+with+numb3rs"'
                                 )
                             },
+                        ],
+                    },
+                ),
+                call(
+                    'POST',
+                    '/domains/123123/records/TXT',
+                    data={
+                        'name': 'txtchunked',
+                        'ttl': 600,
+                        'roundRobin': [
+                            {
+                                'value': (
+                                    '"Lorem ipsum dolor sit amet, consectetur adipiscing '
+                                    'elit, sed do eiusmod tempor incididunt ut labore et dolore '
+                                    'magna aliqua. Ut enim ad minim veniam, quis nostrud '
+                                    'exercitation ullamco laboris nisi ut aliquip ex ea commodo '
+                                    'consequat. Duis aute irure dolor i""n reprehenderit in '
+                                    'voluptate velit esse cillum dolore eu fugiat nulla '
+                                    'pariatur. Excepteur sint occaecat cupidatat non proident, '
+                                    'sunt in culpa qui officia deserunt mollit anim id est '
+                                    'laborum."'
+                                )
+                            }
                         ],
                     },
                 ),
