@@ -493,6 +493,30 @@
 		"disableFlag": false
 	}]
 }, {
+	"id": 1908528,
+	"type": "TXT",
+	"recordType": "txt",
+	"name": "txtchunked",
+	"recordOption": "roundRobin",
+	"noAnswer": false,
+	"note": "",
+	"ttl": 600,
+	"gtdRegion": 1,
+	"parentId": 123123,
+	"parent": "domain",
+	"source": "Domain",
+	"modifiedTs": 1565149966915,
+	"value": [{
+		"value": "\"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor i\"\"n reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\"",
+		"disableFlag": false
+	}],
+	"roundRobin": [{
+		"value": [{
+			"value": "\"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor i\"\"n reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\"",
+			"disableFlag": false
+		}]
+	}]
+}, {
 	"id": 1808524,
 	"type": "NS",
 	"recordType": "ns",
