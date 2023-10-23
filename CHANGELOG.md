@@ -2,6 +2,8 @@
 
 * Use a common code base for ConstellixClient and SonarClient
 * Prepare the authZ code for v4 (Authorization: Bearer)
+* Support for Provider.list_zones to enable dynamic zone config when operating
+  as a source
 
 ## v0.0.4 - 2023-09-24 - ordering is important
 

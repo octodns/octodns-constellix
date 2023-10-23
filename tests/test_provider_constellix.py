@@ -260,6 +260,8 @@ class TestConstellixProvider(TestCase):
                 changes = expected.changes(zone, provider)
                 self.assertEqual(0, len(changes))
 
+            self.assertEqual(['unit.tests.'], provider.list_zones())
+
         # 2nd populate makes no network calls/all from cache
         again = Zone('unit.tests.', [])
         provider.populate(again)

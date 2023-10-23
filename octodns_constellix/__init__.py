@@ -13,6 +13,7 @@ from pycountry_convert import country_alpha2_to_continent_code
 from requests import Session
 
 from octodns import __VERSION__ as octodns_version
+from octodns.idna import IdnaDict
 from octodns.provider import ProviderException
 from octodns.provider.base import BaseProvider
 from octodns.record import Record
@@ -134,7 +135,7 @@ class ConstellixClient(ConstellixAPI):
             resp = self._request('GET', '/domains').json()
             zones += resp
 
-            self._domains = {f'{z["name"]}.': z['id'] for z in zones}
+            self._domains = IdnaDict({f'{z["name"]}.': z['id'] for z in zones})
 
         return self._domains
 
@@ -680,6 +681,10 @@ class ConstellixProvider(BaseProvider):
                 return []
 
         return self._zone_records[zone.name]
+
+    def list_zones(self):
+        self.log.debug('list_zones:')
+        return sorted(self._client.domains.keys())
 
     def populate(self, zone, target=False, lenient=False):
         self.log.debug(
