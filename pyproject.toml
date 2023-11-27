@@ -15,5 +15,6 @@ filterwarnings = [
     'error',
     # pycountry_mappings -> repoze.lru ->
     'ignore:pkg_resources is deprecated',
+    'ignore:Deprecated call to `pkg_resources.declare_namespace',
 ]
 pythonpath = "."
