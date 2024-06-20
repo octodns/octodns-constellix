@@ -1,4 +1,4 @@
-## v0.0.5 - 2023-10-xx - refactor API code
+## v0.0.5 - 2024-06-20 - refactor API code
 
 * Use a common code base for ConstellixClient and SonarClient
 * Prepare the authZ code for v4 (Authorization: Bearer)
