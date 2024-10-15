@@ -35,9 +35,9 @@ class TestConstellixProvider(TestCase):
         # Add our NS record and remove the default test case.
         for record in list(expected.records):
             if record.name == 'sub' and record._type == 'NS':
-                expected._remove_record(record)
+                expected.remove_record(record)
             if record.name == '' and record._type == 'NS':
-                expected._remove_record(record)
+                expected.remove_record(record)
         expected.add_record(
             Record.new(
                 expected,
@@ -256,8 +256,9 @@ class TestConstellixProvider(TestCase):
 
                 zone = Zone('unit.tests.', [])
                 provider.populate(zone)
-                self.assertEqual(18, len(zone.records))
+                self.assertEqual(17, len(zone.records))
                 changes = expected.changes(zone, provider)
+                print(changes)
                 self.assertEqual(0, len(changes))
 
             self.assertEqual(['unit.tests.'], provider.list_zones())
@@ -265,7 +266,7 @@ class TestConstellixProvider(TestCase):
         # 2nd populate makes no network calls/all from cache
         again = Zone('unit.tests.', [])
         provider.populate(again)
-        self.assertEqual(18, len(again.records))
+        self.assertEqual(17, len(again.records))
 
         # Bust the cache.
         del provider._zone_records[zone.name]
@@ -319,22 +320,21 @@ class TestConstellixProvider(TestCase):
             [],
             [],
             [],
-            [],
         ]
         resp.json.side_effect = resp_side_effect
 
         plan = provider.plan(expected)
 
-        # 24 records given in unit.tests.yaml
+        # 23 records given in unit.tests.yaml
         #  1 ALIAS record added
         #  1 Root NS record removed by test setup
-        # 24 records exepected
+        # 23 records exepected
         #  1 ignored
         #  1 exclued
         #  5 unsupported: URLFWD, NAPTR, LOC, SSHFP, DNAME
         #  7 records not applied
         # 18 records applied
-        self.assertEqual(len(expected.records), 24)
+        self.assertEqual(len(expected.records), 23)
         n = len(expected.records) - 7
         self.assertEqual(n, len(plan.changes))
         self.assertEqual(n, provider.apply(plan))
@@ -514,17 +514,6 @@ class TestConstellixProvider(TestCase):
                         'ttl': 300,
                         'roundRobin': [
                             {'value': 'foo.bar.com.', 'disableFlag': False}
-                        ],
-                    },
-                ),
-                call(
-                    'POST',
-                    '/domains/123123/records/SPF',
-                    data={
-                        'name': 'spf',
-                        'ttl': 600,
-                        'roundRobin': [
-                            {'value': '"v=spf1 ip4:192.168.0.1/16-all"'}
                         ],
                     },
                 ),

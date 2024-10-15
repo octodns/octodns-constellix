@@ -43,7 +43,7 @@ setup(
         'test': tests_require,
     },
     install_requires=(
-        'octodns>=0.9.14',
+        'octodns>=1.5.0',
         'pycountry-convert>=0.7.2',
         'requests>=2.27.0',
     ),
