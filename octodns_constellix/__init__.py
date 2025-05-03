@@ -431,19 +431,7 @@ class ConstellixProvider(BaseProvider):
     SUPPORTS_DYNAMIC = True
     SUPPORTS_ROOT_NS = False
     SUPPORTS = set(
-        (
-            'A',
-            'AAAA',
-            'ALIAS',
-            'CAA',
-            'CNAME',
-            'MX',
-            'NS',
-            'PTR',
-            'SPF',
-            'SRV',
-            'TXT',
-        )
+        ('A', 'AAAA', 'ALIAS', 'CAA', 'CNAME', 'MX', 'NS', 'PTR', 'SRV', 'TXT')
     )
 
     def __init__(
@@ -643,8 +631,6 @@ class ConstellixProvider(BaseProvider):
         ]
         return {'ttl': records[0]['ttl'], 'type': _type, 'values': values}
 
-    _data_for_SPF = _data_for_TXT
-
     def _data_for_MX(self, _type, records):
         values = []
         record = records[0]
@@ -727,13 +713,13 @@ class ConstellixProvider(BaseProvider):
         return exists
 
     def _is_healthcheck_configured(self, record):
-        sonar_healthcheck = record._octodns.get('constellix', {}).get(
+        sonar_healthcheck = record.octodns.get('constellix', {}).get(
             'healthcheck', None
         )
         return sonar_healthcheck is not None
 
     def _healthcheck_config(self, record):
-        sonar_healthcheck = record._octodns.get('constellix', {}).get(
+        sonar_healthcheck = record.octodns.get('constellix', {}).get(
             'healthcheck', None
         )
 
@@ -814,8 +800,6 @@ class ConstellixProvider(BaseProvider):
                 {'value': value.replace('\\;', ';').replace('" "', '""')}
             )
         yield {'name': record.name, 'ttl': record.ttl, 'roundRobin': values}
-
-    _params_for_SPF = _params_for_TXT
 
     def _params_for_CAA(self, record):
         values = []

@@ -437,28 +437,6 @@
 		"disableFlag": false
 	}]
 }, {
-	"id": 1808526,
-	"type": "SPF",
-	"recordType": "spf",
-	"name": "spf",
-	"recordOption": "roundRobin",
-	"noAnswer": false,
-	"note": "",
-	"ttl": 600,
-	"gtdRegion": 1,
-	"parentId": 123123,
-	"parent": "domain",
-	"source": "Domain",
-	"modifiedTs": 1565149916132,
-	"value": [{
-		"value": "\"v=spf1 ip4:192.168.0.1/16-all\"",
-		"disableFlag": false
-	}],
-	"roundRobin": [{
-		"value": "\"v=spf1 ip4:192.168.0.1/16-all\"",
-		"disableFlag": false
-	}]
-}, {
 	"id": 1808528,
 	"type": "TXT",
 	"recordType": "txt",
