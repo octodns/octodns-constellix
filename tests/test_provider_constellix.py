@@ -28,7 +28,9 @@ from octodns_constellix import (
 class TestConstellixProvider(TestCase):
     def populate_expected(self, zone_name):
         expected = Zone(zone_name, [])
-        source = YamlProvider('test', join(dirname(__file__), 'config'))
+        source = YamlProvider(
+            'test', join(dirname(__file__), 'config'), escaped_semicolons=False
+        )
         source.populate(expected)
 
         # Constellix does not allow IP addresses for NS entries.
